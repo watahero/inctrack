@@ -32,7 +32,11 @@ messages. No packet inspection, no memory reading.
 
 ## Install
 
-1. Download or clone this repository.
+1. Download the latest release or clone this repository:
+
+   ```
+   git clone https://github.com/watahero/incursiontracker.git
+   ```
 2. Copy the `incursiontracker` folder into your Ashita addons directory:
 
    ```

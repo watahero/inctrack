@@ -20,6 +20,7 @@
 addon.name    = 'IncursionTracker';
 addon.author  = 'Godwen (written with Claude)';
 addon.version = '1.0.0';
+addon.link    = 'https://github.com/watahero/incursiontracker';
 addon.desc    = 'Live Incursion objective, progress and timers. Independent project, not affiliated with other Incursion addons.';
 
 require('common');
