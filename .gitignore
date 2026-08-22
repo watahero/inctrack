@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Private data. The test suite can replay real chatlogs, but they are personal
+# and large; point it at them with INCURSION_CHATLOGS instead of committing.
+chatlogs/
+*.log
+
+# Ashita writes per-character settings next to the addon when run from a
+# checkout; never ship those.
+config/
+settings/
