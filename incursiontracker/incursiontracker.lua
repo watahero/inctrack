@@ -17,8 +17,8 @@
 *     /incursion auto     Toggle automatic show/hide
 ]]--
 
-addon.name    = 'IncursionTracker';
-addon.author  = 'Godwen (written with Claude)';
+addon.name    = 'IncTrack';
+addon.author  = 'Godwen';
 addon.version = '1.1.0';
 addon.link    = 'https://github.com/watahero/incursiontracker';
 addon.desc    = 'Live Incursion objective, progress and timers. Independent project, not affiliated with other Incursion addons.';
@@ -122,8 +122,7 @@ incursion.state = State.new({ clock = now });
 ashita.events.register('load', 'incursion_load', function ()
     -- Identify this build plainly so it is not mistaken for another Incursion
     -- addon or plugin.
-    printf('v%s by %s. Independent project; not affiliated with other Incursion addons. /incursion to toggle.',
-           addon.version, addon.author);
+    printf('v%s by %s (written with Claude). /incursion to toggle.', addon.version, addon.author);
 
     local name = AshitaCore:GetMemoryManager():GetParty():GetMemberName(0);
     if name ~= nil and name ~= '' then

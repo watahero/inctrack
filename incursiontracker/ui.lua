@@ -340,7 +340,7 @@ function ui.render(state, opts)
     imgui.PushStyleVar(ImGuiStyleVar_ItemSpacing, ARG_PAD_TIGHT);
 
     ARG_OPEN[1] = true;
-    if imgui.Begin('IncursionTracker###incursion_window', ARG_OPEN, flags) then
+    if imgui.Begin('IncTrack###incursion_window', ARG_OPEN, flags) then
         origin_x = imgui.GetCursorPosX();
         imgui.Dummy(ARG_SPACER);   -- pins the content width to CONTENT_W
 
