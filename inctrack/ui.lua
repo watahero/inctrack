@@ -21,8 +21,8 @@
 *     BONUS Sentry Lizard 2/5                       6:00
 *     [=====--------------------------------------------]
 *     Phases cleared 2                      Elapsed 4:00
-*     Ronin's Revenge        WS Accuracy+15 / Store TP+8
-*     Stallwart's Sentinel   VIT+10 / Damage taken-15%
+*     Ronin's Revenge                   WS Acc+15 STP+8
+*     Stallwart's Sentinel                VIT+10 DT-15%
 ]]--
 
 local imgui = require('imgui');
@@ -283,9 +283,76 @@ local function draw_stats(state, run)
     right_text('Elapsed ' .. clock_str(state:elapsed()), COLOR.dim);
 end
 
--- The boons chosen this run, one per line: name, then what it actually does.
--- The stats are the part worth glancing at mid-fight, so they are inline
--- rather than hidden behind a hover.
+--[[
+* Boon stat text, shortened to the usual FFXI abbreviations for display.
+*
+* Display-only: the run record keeps the server's wording. Longer phrases are
+* listed before their substrings ('R.Accuracy' before 'Accuracy', 'Physical
+* dmg taken' before 'Damage taken') so each is replaced whole. Anything not in
+* the table passes through untouched, so a boon added later still reads.
+]]--
+local STAT_SHORT = {
+    { 'HP/MP Rec. while healing', 'Rest'  },
+    { 'Physical dmg taken',       'PDT'   },
+    { 'Phys. dmg taken',          'PDT'   },
+    { 'Damage taken',             'DT'    },
+    { 'Magic Atk. Bonus',         'MAB'   },
+    { 'Magic Acc.',               'MAcc'  },
+    { 'WS Accuracy',              'WS Acc'},
+    { 'R.Accuracy',               'RAcc'  },
+    { 'R.Attack',                 'RAtt'  },
+    { 'Dbl. Attack',              'DA'    },
+    { 'Accuracy',                 'Acc'   },
+    { 'Attack',                   'Att'   },
+    { 'Crit. Hit Rate',           'Crit'  },
+    { 'Store TP',                 'STP'   },
+    { 'Cure Potency',             'Cure'  },
+    { 'Waltz Potency',            'Waltz' },
+    { 'Fast Cast',                'FC'    },
+    { 'Move. Speed',              'Speed' },
+    { 'Combat Skills',            'Skills'},
+    { 'Evasion',                  'Eva'   },
+    { 'Enmity',                   'Enm'   },
+};
+
+-- Plain-text find/replace; the phrases contain '.' which Lua patterns would
+-- otherwise treat as a wildcard.
+local function replace_plain(s, from, to)
+    local out, i = {}, 1;
+    while true do
+        local a, b = s:find(from, i, true);
+        if not a then
+            out[#out + 1] = s:sub(i);
+            break;
+        end
+        out[#out + 1] = s:sub(i, a - 1);
+        out[#out + 1] = to;
+        i = b + 1;
+    end
+    return table.concat(out);
+end
+
+-- Memoised: the same few strings are shortened every frame.
+local short_cache = {};
+
+local function shorten(stats)
+    local hit = short_cache[stats];
+    if hit then
+        return hit;
+    end
+
+    local s = stats;
+    for i = 1, #STAT_SHORT do
+        s = replace_plain(s, STAT_SHORT[i][1], STAT_SHORT[i][2]);
+    end
+    -- 'Skills +10' -> 'Skills+10'; ' / ' -> single space.
+    s = s:gsub('%s+([%+%-])', '%1'):gsub('%s*/%s*', ' ');
+
+    short_cache[stats] = s;
+    return s;
+end
+
+-- The boons chosen this run, one per line: name, then shorthand stats.
 local function draw_boons(run)
     local boons = run.boons;
     if not boons or #boons == 0 then
@@ -295,10 +362,7 @@ local function draw_boons(run)
     for i = 1, #boons do
         imgui.TextColored(COLOR.boon, boons[i].name);
         if boons[i].stats then
-            imgui.SameLine();
-            -- Wrapped so an unusually long stat string folds under the name
-            -- instead of pushing the window wider.
-            wrapped(boons[i].stats, COLOR.dim);
+            right_text(shorten(boons[i].stats), COLOR.dim);
         end
     end
 end

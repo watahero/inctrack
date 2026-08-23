@@ -3,8 +3,8 @@
 ## 1.1.0 — 2026-08-23
 
 - Shows the boons picked between phases (`gains the effect of <Boon> (...): <stats>`),
-  one per line with their stats. They persist across reloads like the rest of
-  the run.
+  one per line with their stats in FFXI shorthand. They persist across reloads
+  like the rest of the run.
 - Much more compact window: no title bar, instance clock on the header line,
   phase and kill count drawn as the progress bar's own label, boss objective as
   a single orange bar, one stats line, thin secondary bars, tighter spacing.

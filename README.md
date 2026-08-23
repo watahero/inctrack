@@ -17,8 +17,8 @@ server's own chat messages. No packet inspection, no memory reading.
 | BONUS Sentry Lizard  2/5                6:00 |
 |=================---------------------------  |
 | Phases cleared 2                Elapsed 4:00 |
-| Ronin's Revenge  WS Accuracy+15 / Store TP+8 |
-| Stallwart's Sentinel  VIT+10 / Dmg taken-15% |
+| Ronin's Revenge              WS Acc+15 STP+8 |
+| Stallwart's Sentinel           VIT+10 DT-15% |
 +----------------------------------------------+
 ```
 
@@ -80,8 +80,9 @@ finishes.
   one arrives. Shown with a `~` because the server only ever reports whole
   minutes. Amber under 5 minutes, red under 1.
 - **Phases cleared** and elapsed time for the current run.
-- **Boons** chosen between phases, one per line with their stats. They last
-  the whole run, and survive a reload with the rest of it.
+- **Boons** chosen between phases, one per line with their stats in the usual
+  shorthand (`Acc`, `DA`, `STP`, `DT`, `MAB`, `FC`...). They last the whole run,
+  and survive a reload with the rest of it.
 
 The window has no title bar; drag it by its body (`/incursion lock` to pin it).
 
