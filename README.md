@@ -4,7 +4,7 @@ A live HUD for **CatsEyeXI** Incursions. Ashita v4 addon.
 
 Shows the current instance, phase and kill progress, the mobs that count, the
 boss waiting at the end of the phase, the bonus objective with its countdown,
-time left, points, phases cleared, and the boons you picked — all read from the
+time left, phases cleared, and the boons you picked — all read from the
 server's own chat messages. No packet inspection, no memory reading.
 
 ```
@@ -16,7 +16,7 @@ server's own chat messages. No packet inspection, no memory reading.
 | Next: Orcish Sieger                    (I-9) |
 | BONUS Sentry Lizard  2/5                6:00 |
 |=================---------------------------  |
-| Pts 233  Ph 2                   Elapsed 4:00 |
+| Phases cleared 2                Elapsed 4:00 |
 | Ronin's Revenge  WS Accuracy+15 / Store TP+8 |
 | Stallwart's Sentinel  VIT+10 / Dmg taken-15% |
 +----------------------------------------------+
@@ -79,7 +79,7 @@ finishes.
 - **Time left** counts down from the server's sync and snaps whenever a fresh
   one arrives. Shown with a `~` because the server only ever reports whole
   minutes. Amber under 5 minutes, red under 1.
-- **Points and phases cleared** for the current run, reset when a new one starts.
+- **Phases cleared** and elapsed time for the current run.
 - **Boons** chosen between phases, one per line with their stats. They last
   the whole run, and survive a reload with the rest of it.
 
@@ -128,13 +128,11 @@ fact, and the window says which parts it cannot vouch for:
 |---|---|
 | Just reconnected | `reconnected - awaiting update`, kill count and bar in amber |
 | Back on a later phase | Old mob list kept but marked `(?)`; the old boss preview is dropped |
-| Boss kills missed | `Phases` corrected — reaching phase N means N-1 were cleared — and `Points` shown as `233+` |
+| Boss kills missed | `Phases cleared` corrected — reaching phase N means N-1 were cleared |
 | Boss died while away | Kill progress cleared to `Waiting for next objective...` rather than frozen mid-count |
 | Bonus lapsed while away | Dropped, not left sitting at `0:00` |
 
-Everything clears as soon as real information arrives. Points awarded while
-disconnected cannot be recovered — the server sends that number once — which
-is why the total is marked `+` rather than quietly under-reported.
+Everything clears as soon as real information arrives.
 
 ## Development
 

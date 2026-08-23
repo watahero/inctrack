@@ -9,6 +9,7 @@
   phase and kill count drawn as the progress bar's own label, boss objective as
   a single orange bar, one stats line, thin secondary bars, tighter spacing.
   Roughly half the previous height.
+- Points are no longer displayed (still tracked internally to count phases).
 
 ## 1.0.0 — 2026-08-20
 

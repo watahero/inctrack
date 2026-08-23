@@ -20,7 +20,7 @@
 *     Next: Orcish Sieger                          (I-9)
 *     BONUS Sentry Lizard 2/5                       6:00
 *     [=====--------------------------------------------]
-*     Pts 233  Ph 2                         Elapsed 4:00
+*     Phases cleared 2                      Elapsed 4:00
 *     Ronin's Revenge        WS Accuracy+15 / Store TP+8
 *     Stallwart's Sentinel   VIT+10 / Damage taken-15%
 ]]--
@@ -273,20 +273,10 @@ local function draw_extra(state, run)
     end
 end
 
--- Points, phases cleared, elapsed -- one line.
+-- Phases cleared and elapsed -- one line. Points are tracked in state (the
+-- count of awards is how phases cleared is derived) but not displayed.
 local function draw_stats(state, run)
-    -- '+' marks a total we know is short: boss kills that happened while we
-    -- were disconnected awarded points the client never saw.
-    local points = tostring(run.points or 0);
-    if run.points_partial then
-        points = points .. '+';
-    end
-
-    imgui.TextColored(COLOR.dim, 'Pts ');
-    imgui.SameLine();
-    imgui.TextColored(run.points_partial and COLOR.warn or COLOR.instance, points);
-    imgui.SameLine();
-    imgui.TextColored(COLOR.dim, '  Ph ');
+    imgui.TextColored(COLOR.dim, 'Phases cleared ');
     imgui.SameLine();
     imgui.TextColored(COLOR.text, tostring(run.phases_cleared or 0));
 
