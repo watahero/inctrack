@@ -198,6 +198,17 @@ local specific = {
             return { t = 'points', who = who, amount = tonumber(amount) };
         end
     end,
+
+    -- Godwen gains the effect of Ronin's Revenge (<glyph>): WS Accuracy+15 / Store TP+8
+    -- A boon chosen between phases. Ordinary buffs ('gains the effect of
+    -- Protect.') have no '(glyph): stats' tail, which is what makes this
+    -- unambiguous. The glyph is a client-side icon code and is discarded.
+    function(s)
+        local who, name, stats = s:match('^(%S+) gains the effect of (.-) %(.-%): (.+)$');
+        if who then
+            return { t = 'boon', who = who, name = trim(name), stats = trim(stats) };
+        end
+    end,
 };
 
 --[[
@@ -294,7 +305,8 @@ function parser.parse(line)
         or s:find('^Bonus Objective: ')
         or s:find('^%(Boss: ')
         or s:find('^You have %d')
-        or s:find('incursion points%.$')) then
+        or s:find('incursion points%.$')
+        or s:find('): ', 1, true)) then   -- the '(glyph): stats' tail of a boon
         return nil;
     end
 

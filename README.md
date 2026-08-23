@@ -4,25 +4,21 @@ A live HUD for **CatsEyeXI** Incursions. Ashita v4 addon.
 
 Shows the current instance, phase and kill progress, the mobs that count, the
 boss waiting at the end of the phase, the bonus objective with its countdown,
-time left, points and phases cleared — all read from the server's own chat
-messages. No packet inspection, no memory reading.
+time left, points, phases cleared, and the boons you picked — all read from the
+server's own chat messages. No packet inspection, no memory reading.
 
 ```
-+--------------------------------------------+
-| Fort Ghelsba                        Normal |
-|--------------------------------------------|
-| Phase #3                             12/15 |
-| [########################......]           |
-| Orcish Grunt, Orcish Neckchopper, Orcish   |
-| Stonechucker                               |
-| Next: Orcish Sieger                  (I-9) |
-|--------------------------------------------|
-| BONUS  Sentry Lizard                  6:00 |
-| [############..................]      2/5  |
-|--------------------------------------------|
-| Time left ~64:00     Elapsed  4:00         |
-| Points    233        Phases   2            |
-+--------------------------------------------+
++----------------------------------------------+
+| Fort Ghelsba . Normal                 ~64:00 |
+|############# Phase #3  12/15 #####.........  |
+| Orcish Grunt, Orcish Neckchopper, Orcish     |
+| Stonechucker                                 |
+| Next: Orcish Sieger                    (I-9) |
+| BONUS Sentry Lizard  2/5                6:00 |
+|=================---------------------------  |
+| Pts 233  Ph 2                   Elapsed 4:00 |
+| Ronin's Revenge, Stallwart's Sentinel        |
++----------------------------------------------+
 ```
 
 > **Not affiliated** with the CatsEyeXI server team or with any other Incursion
@@ -83,6 +79,10 @@ finishes.
   one arrives. Shown with a `~` because the server only ever reports whole
   minutes. Amber under 5 minutes, red under 1.
 - **Points and phases cleared** for the current run, reset when a new one starts.
+- **Boons** chosen between phases, listed by name; hover the line for their
+  stats. They last the whole run, and survive a reload with the rest of it.
+
+The window has no title bar; drag it by its body (`/incursion lock` to pin it).
 
 Phase totals are deliberately not shown — the count varies by instance and the
 chat stream never states it. Loot is not tracked; it lands in your inventory

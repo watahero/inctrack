@@ -64,6 +64,9 @@ local function new_run(self, instance, difficulty)
         -- their label. Future content lands here instead of being lost.
         extra          = {},
         note           = nil,
+        -- Boons chosen between phases, in pick order. They last the whole
+        -- run and the server never re-announces them.
+        boons          = {},
         time_left      = nil,   -- seconds remaining at time_sync
         time_sync      = nil,
         started        = self:now(),
@@ -375,6 +378,25 @@ function State:apply(e)
         return true;
     end
 
+    if t == 'boon' then
+        -- Ours only, same rule as points.
+        if self.player and e.who ~= self.player then
+            return false;
+        end
+        -- Dedupe by name: a repeat pick (or a replayed line) updates the
+        -- stats in place rather than listing the boon twice.
+        for i = 1, #run.boons do
+            if run.boons[i].name == e.name then
+                run.boons[i].stats = e.stats;
+                self.dirty = true;
+                return true;
+            end
+        end
+        run.boons[#run.boons + 1] = { name = e.name, stats = e.stats };
+        self.dirty = true;
+        return true;
+    end
+
     if t == 'complete' then
         run.finished      = true;
         run.finish_time   = string.format('%dm %ds', e.minutes, e.seconds);
@@ -531,7 +553,12 @@ function State:serialise()
         time_left      = self:time_left(),
         saved_at       = os.time(),
         extra          = {},
+        boons          = {},
     };
+
+    for i = 1, #run.boons do
+        out.boons[i] = { name = run.boons[i].name, stats = run.boons[i].stats };
+    end
 
     if run.bonus then
         out.bonus = {
@@ -604,6 +631,15 @@ function State:restore(data)
             done  = data.bonus.done or false,
             expires_at = data.bonus.remaining and (now + data.bonus.remaining) or nil,
         };
+    end
+
+    if type(data.boons) == 'table' then
+        for i = 1, #data.boons do
+            local b = data.boons[i];
+            if type(b) == 'table' and b.name then
+                run.boons[#run.boons + 1] = { name = b.name, stats = b.stats };
+            end
+        end
     end
 
     if type(data.extra) == 'table' then

@@ -38,6 +38,7 @@ Verified against ~106 real runs across 8 instances in the author's chatlogs
 | `Incursion [Fort Ghelsba] Bonus Objective: Sentry Lizard 2/5` | Bonus progress. |
 | `Incursion [Fort Ghelsba] Bonus Objective Complete!` | Bonus done. |
 | `Incursion [Fort Ghelsba] Complete! (Normal) Time: 48m 44s` | Run over. |
+| `Godwen gains the effect of Ronin's Revenge (<glyph>): WS Accuracy+15 / Store TP+8` | Boon picked between phases. The `(glyph): stats` tail distinguishes it from an ordinary buff (`gains the effect of Protect.`). Not re-announced on recovery. |
 
 ## Architecture
 
@@ -60,7 +61,7 @@ incursiontracker.lua  entry: registers text_in / d3d_present / command; owns set
 **Specific tier** — the shapes the server sends today, recognised precisely so
 the window can draw bars, coordinates and timers: `begin`, `recover`,
 `complete`, `phase`, `objective_kills`, `objective_boss`, `boss_hint`,
-`bonus_new`, `bonus_progress`, `bonus_done`, `time`, `points`.
+`bonus_new`, `bonus_progress`, `bonus_done`, `time`, `points`, `boon`.
 
 Patterns are anchored and ordered where two could overlap (`bonus_progress`
 before `phase`; `objective_kills` before `objective_boss`; the bonus
@@ -98,6 +99,7 @@ run = {
   bonus      = { kind, label, cur, max, expires_at, done },
   extra      = { [label] = { label, cur, max, done, at } },   -- unknown counters
   note       = { text, at },                                  -- unknown status line
+  boons      = { { name, stats }, ... },                      -- picks, in order
   time_left, time_sync,          -- seconds; ticked locally, snapped on sync
   started, points, phases_cleared,
   finished, finish_time, hide_at,

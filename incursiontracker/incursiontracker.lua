@@ -19,7 +19,7 @@
 
 addon.name    = 'IncursionTracker';
 addon.author  = 'Godwen (written with Claude)';
-addon.version = '1.0.0';
+addon.version = '1.1.0';
 addon.link    = 'https://github.com/watahero/incursiontracker';
 addon.desc    = 'Live Incursion objective, progress and timers. Independent project, not affiliated with other Incursion addons.';
 
@@ -64,6 +64,7 @@ local MUST_SAVE = {
     bonus_new      = true,
     bonus_done     = true,
     generic_done   = true,
+    boon           = true,
 };
 
 local function printf(fmt, ...)

@@ -82,6 +82,7 @@ MUST_PARSE = re.compile(
     r"|Bonus Objective: (?:Defeat |Find the hidden chest!)"
     r"|You have \d+ minutes? remaining inside this Incursion\.$"
     r"|\S+ gains \d+ incursion points\.$"
+    r"|\S+ gains the effect of .+ \(.*\): .+"
     r")"
 )
 
@@ -395,6 +396,38 @@ def test_state_units(lua, parser, State):
     res.check(int(s8.elapsed(s8)) == 48 * 60 + 44,
               "elapsed not frozen to server time")
     res.check(bool(s8.should_show(s8)), "window hidden immediately on completion")
+
+    # Boons: the buffs picked between phases. The glyph inside the parens is a
+    # client icon code -- real logs carry raw high bytes there -- and must be
+    # discarded; the two bytes below are what the log actually contains.
+    glyph = "()"
+    s9 = new_state(lua, State)
+    feed(s9, parser, [
+        "Incursion [Fort Ghelsba] Begins! (Normal)",
+        "Godwen gains the effect of Ronin's Revenge %s: WS Accuracy+15 / Store TP+8" % glyph,
+        "Godwen gains the effect of Protect.",                 # ordinary buff
+        "Godwen gains the effect of Stoneskin.",
+        "Vidikh gains the effect of Fighter's Fury %s: STR+8 / Attack+15" % glyph,
+        "Godwen gains the effect of Stallwart's Sentinel %s: VIT+10 / Damage taken-15%%" % glyph,
+    ])
+    boons = list(s9.snapshot(s9)["boons"].values())
+    res.check([b["name"] for b in boons] == ["Ronin's Revenge", "Stallwart's Sentinel"],
+              "boons wrong: %r" % [b["name"] for b in boons])
+    res.check(boons[0]["stats"] == "WS Accuracy+15 / Store TP+8",
+              "boon stats wrong: %r" % boons[0]["stats"])
+
+    # A repeated pick updates in place rather than listing twice.
+    feed(s9, parser, [
+        "Godwen gains the effect of Ronin's Revenge %s: WS Accuracy+20 / Store TP+10" % glyph,
+    ])
+    boons = list(s9.snapshot(s9)["boons"].values())
+    res.check(len(boons) == 2 and boons[0]["stats"].endswith("TP+10"),
+              "repeat boon not deduped: %r" % [(b["name"], b["stats"]) for b in boons])
+
+    # Cleared by a new run.
+    feed(s9, parser, ["Incursion [Giddeus] Begins! (Normal)"])
+    res.check(len(list(s9.snapshot(s9)["boons"].values())) == 0,
+              "boons carried into a new run")
 
     return res
 
@@ -821,6 +854,7 @@ def test_json_roundtrip(lua, parser, State, libs):
         "Bonus Objective: Defeat 5 Sentry Lizard! (Expires in 10 Minutes)",
         "Incursion [Fort Ghelsba] Bonus Objective: Sentry Lizard 2/5",
         "Incursion [Fort Ghelsba] Seals Broken 2/6",
+        "Godwen gains the effect of Ronin's Revenge (\x81\x98): WS Accuracy+15 / Store TP+8",
     ])
 
     try:
@@ -855,6 +889,10 @@ def test_json_roundtrip(lua, parser, State, libs):
     res.check(int(s2.time_left(s2)) == int(s.time_left(s)), "time left lost")
     res.check(extra_of(s2).get("Seals Broken") == (2, 6, False),
               "unknown counter lost: %r" % extra_of(s2))
+    boons = list(b["boons"].values())
+    res.check(len(boons) == 1 and boons[0]["name"] == "Ronin's Revenge"
+              and boons[0]["stats"] == "WS Accuracy+15 / Store TP+8",
+              "boons lost in round trip: %r" % [(x["name"], x["stats"]) for x in boons])
 
     # A finished run is not resumed -- it would pop a stale 'Complete!' window
     # on the next login for a run that is already over.

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0 — 2026-08-23
+
+- Shows the boons picked between phases (`gains the effect of <Boon> (...): <stats>`),
+  names on one line, full stats on hover. They persist across reloads like the
+  rest of the run.
+- Much more compact window: no title bar, instance clock on the header line,
+  phase and kill count drawn as the progress bar's own label, boss objective as
+  a single orange bar, one stats line, thin secondary bars, tighter spacing.
+  Roughly half the previous height.
+
 ## 1.0.0 — 2026-08-20
 
 First release.
