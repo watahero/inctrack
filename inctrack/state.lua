@@ -1,5 +1,5 @@
 --[[
-* IncursionTracker -- state.lua
+* inctrack -- state.lua
 * Copyright (c) 2026 Godwen. MIT License; see LICENSE in the repository root.
 * Written with Claude (Anthropic).
 ]]--

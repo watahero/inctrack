@@ -1,4 +1,4 @@
-# IncursionTracker
+# inctrack
 
 A live HUD for **CatsEyeXI** Incursions. Ashita v4 addon.
 
@@ -32,21 +32,21 @@ server's own chat messages. No packet inspection, no memory reading.
 1. Download the latest release or clone this repository:
 
    ```
-   git clone https://github.com/watahero/incursiontracker.git
+   git clone https://github.com/watahero/inctrack.git
    ```
-2. Copy the `incursiontracker` folder into your Ashita addons directory:
+2. Copy the `inctrack` folder into your Ashita addons directory:
 
    ```
-   <CatsEyeXI install>\catseyexi-client\Ashita\addons\incursiontracker\
+   <CatsEyeXI install>\catseyexi-client\Ashita\addons\inctrack\
    ```
 
-   The folder must contain `incursiontracker.lua`, `parser.lua`, `state.lua`
+   The folder must contain `inctrack.lua`, `parser.lua`, `state.lua`
    and `ui.lua`.
 
 3. In game:
 
    ```
-   /addon load incursiontracker
+   /addon load inctrack
    ```
 
    You should see a line in chat confirming the version and author.
@@ -137,8 +137,8 @@ Everything clears as soon as real information arrives.
 ## Development
 
 ```
-incursiontracker/
-  incursiontracker.lua   Ashita glue: events, commands, settings, load banner
+inctrack/
+  inctrack.lua   Ashita glue: events, commands, settings, load banner
   parser.lua             Chat line -> event. Pure Lua, stateless, two tiers
   state.lua              Event -> run record. Owns the timers
   ui.lua                 Draws the run record. Read-only
@@ -184,8 +184,7 @@ This is an independent project. It is not affiliated with, endorsed by, or
 derived from the CatsEyeXI server, its team, or any other addon. In particular
 it shares no code with the `trove` addon's Incursion plugin, which is a static
 content browser by a different author — the similar name is a coincidence of
-subject, which is why this addon is called *IncursionTracker* and identifies
-itself on load.
+subject, which is why this addon identifies itself on load.
 
 ## License
 

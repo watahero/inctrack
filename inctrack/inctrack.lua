@@ -1,5 +1,5 @@
 --[[
-* IncursionTracker -- live objective and progress HUD for CatsEyeXI Incursions.
+* inctrack -- live objective and progress HUD for CatsEyeXI Incursions.
 *
 * Copyright (c) 2026 Godwen
 * Licensed under the MIT License. See LICENSE in the repository root.
@@ -17,10 +17,10 @@
 *     /incursion auto     Toggle automatic show/hide
 ]]--
 
-addon.name    = 'IncTrack';
+addon.name    = 'inctrack';
 addon.author  = 'Godwen';
 addon.version = '1.1.0';
-addon.link    = 'https://github.com/watahero/incursiontracker';
+addon.link    = 'https://github.com/watahero/inctrack';
 addon.desc    = 'Live Incursion objective, progress and timers. Independent project, not affiliated with other Incursion addons.';
 
 require('common');

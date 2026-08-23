@@ -1,5 +1,5 @@
 """
-IncursionTracker test suite.
+inctrack test suite.
 
 Loads the addon's real Lua modules (parser.lua, state.lua) into an embedded Lua
 runtime and exercises them -- so a pass here means the shipped code, not a
@@ -37,7 +37,7 @@ import glob
 import lupa
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ADDON = os.path.join(os.path.dirname(HERE), "incursiontracker")
+ADDON = os.path.join(os.path.dirname(HERE), "inctrack")
 
 # Name used in the synthetic unit-test fixtures below. Unrelated to any real
 # character; the replay suites read the real name off the log filenames.
@@ -920,7 +920,7 @@ def main():
     libs = find_ashita_libs(logdir)
     lua, parser, State = make_lua()
 
-    print("IncursionTracker tests")
+    print("inctrack tests")
 
     suites = []
 

@@ -1,11 +1,11 @@
-# IncursionTracker — Design
+# inctrack — Design
 
 **Target:** Ashita v4 (CatsEyeXI), Lua + ImGui
-**Install path:** `<Ashita>\addons\incursiontracker\`
+**Install path:** `<Ashita>\addons\inctrack\`
 **Author:** Godwen, written with Claude (Anthropic). Independent project; see README.
 
 Revised 2026-08-20: loot tracking removed, generic parser tier added,
-disconnect handling, renamed from `incursion` to `IncursionTracker`.
+disconnect handling, renamed from `incursion` to `inctrack`.
 
 ## Purpose
 
@@ -47,7 +47,7 @@ with no Ashita dependency, so they run under a standalone interpreter for
 testing.
 
 ```
-incursiontracker.lua  entry: registers text_in / d3d_present / command; owns settings
+inctrack.lua  entry: registers text_in / d3d_present / command; owns settings
    |
    +-- parser.lua   chat line -> event table (or nil). Stateless, two tiers.
    +-- state.lua    event -> run record. Owns timers. Injectable clock.
