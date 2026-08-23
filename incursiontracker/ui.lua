@@ -21,7 +21,8 @@
 *     BONUS Sentry Lizard 2/5                       6:00
 *     [=====--------------------------------------------]
 *     Pts 233  Ph 2                         Elapsed 4:00
-*     Ronin's Revenge, Stallwart's Sentinel   (hover: stats)
+*     Ronin's Revenge        WS Accuracy+15 / Store TP+8
+*     Stallwart's Sentinel   VIT+10 / Damage taken-15%
 ]]--
 
 local imgui = require('imgui');
@@ -292,30 +293,23 @@ local function draw_stats(state, run)
     right_text('Elapsed ' .. clock_str(state:elapsed()), COLOR.dim);
 end
 
--- The boons chosen this run: names on one wrapped line, stats on hover so a
--- run with seven picks does not turn the window into a spreadsheet.
+-- The boons chosen this run, one per line: name, then what it actually does.
+-- The stats are the part worth glancing at mid-fight, so they are inline
+-- rather than hidden behind a hover.
 local function draw_boons(run)
     local boons = run.boons;
     if not boons or #boons == 0 then
         return;
     end
 
-    local names = {};
     for i = 1, #boons do
-        names[i] = boons[i].name;
-    end
-    wrapped(table.concat(names, ', '), COLOR.boon);
-
-    if imgui.IsItemHovered() then
-        imgui.BeginTooltip();
-        for i = 1, #boons do
-            imgui.TextColored(COLOR.boon, boons[i].name);
-            if boons[i].stats then
-                imgui.SameLine();
-                imgui.TextColored(COLOR.dim, '  ' .. boons[i].stats);
-            end
+        imgui.TextColored(COLOR.boon, boons[i].name);
+        if boons[i].stats then
+            imgui.SameLine();
+            -- Wrapped so an unusually long stat string folds under the name
+            -- instead of pushing the window wider.
+            wrapped(boons[i].stats, COLOR.dim);
         end
-        imgui.EndTooltip();
     end
 end
 
