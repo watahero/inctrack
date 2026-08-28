@@ -1228,6 +1228,59 @@ def test_json_roundtrip(lua, parser, State, libs):
               and boons[0]["stats"] == "WS Accuracy+15 / Store TP+8",
               "boons lost in round trip: %r" % [(x["name"], x["stats"]) for x in boons])
 
+    # --- the stubbed json and the real one must agree ---------------------
+
+    # The addon-shell suite round-trips a saved run through the *stubbed* json
+    # in stubs.py, so it is only ever as true as that stub -- and the stub is
+    # both more permissive and more opinionated than json.lua: it sorts object
+    # keys, emits bytes >= 0x80 raw rather than escaped, encodes an empty
+    # table as {} and never [], and accepts a leading '+' on a number. Nothing
+    # compared the two. If they disagree, the shell suite is green against a
+    # fiction while the shipped addon loses the player's in-progress run on
+    # the next reload -- the one failure the persistence code exists to
+    # prevent.
+    #
+    # Compared through the text rather than the table: a Lua table proxy
+    # belongs to the runtime that built it, and a JSON string is the only
+    # thing that actually travels between the addon and a settings file.
+    stub = stubs.AshitaHost(lua_runtime()).json
+
+    stub_read = stub.decode(encoded)
+    res.check(stub_read is not None
+              and stub_read["instance"] == "Fort Ghelsba"
+              and int(stub_read["phase"]) == 2
+              and stub_read["bonus"]["label"] == "Sentry Lizard",
+              "the harness's json cannot read what Ashita's json writes, so "
+              "the addon-shell suite proves nothing about a real save: %r"
+              % (encoded,))
+
+    s6 = new_state(lua, State)
+    crossed = js.decode(stub.encode(stub_read)) if stub_read is not None else None
+    res.check(crossed is not None and bool(s6.restore(s6, crossed)),
+              "the harness's json writes a run Ashita's json cannot read back")
+
+    c = s6.snapshot(s6)
+    res.check(c is not None
+              and c["instance"] == a["instance"]
+              and int(c["phase"]) == 2
+              and int(c["kills_cur"]) == 13
+              and c["next_boss"]["name"] == "Orcish Martial"
+              and c["bonus"]["label"] == "Sentry Lizard"
+              and int(c["bonus"]["cur"]) == 2,
+              "a run written by one json and read by the other came back "
+              "different, so the two suites are testing different formats")
+    res.check(c is not None
+              and extra_of(s6).get("Seals Broken") == (2, 6, False),
+              "an unknown counter did not survive the two encoders: %r"
+              % (extra_of(s6),))
+    crossed_boons = list(c["boons"].values()) if c is not None else []
+    res.check(len(crossed_boons) == 1
+              and crossed_boons[0]["name"] == boons[0]["name"]
+              and crossed_boons[0]["stats"] == boons[0]["stats"],
+              "a boon name carrying the server's raw high bytes did not "
+              "survive the two encoders: %r"
+              % ([(x["name"], x["stats"]) for x in crossed_boons],))
+
     # A finished run is not resumed -- it would pop a stale 'Complete!' window
     # on the next login for a run that is already over.
     s3 = new_state(lua, State)
