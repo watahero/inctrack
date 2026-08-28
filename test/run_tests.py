@@ -319,17 +319,18 @@ def extra_of(state):
 XFAIL_MARK = "XFAIL "
 FIXED_MARK = "NOW PASSING "
 
-# The confirmed defects this phase brings under test -- and nothing else.
-# Three, exactly:
+# The confirmed defects still under test -- and nothing else. Two are left:
 #
-#   * a bonus objective payout counted as a cleared phase   (state suite)
 #   * the run clock not aged by the time spent unloaded     (state suite)
 #   * the close button the window asks for and then ignores (ui suite)
 #
-# A fourth means something regressed; a missing one means a fix landed before
+# FIX-01, the bonus objective payout counted as a cleared phase, is fixed and
+# its line is an ordinary check now.
+#
+# A third means something regressed; a missing one means a fix landed before
 # its red line could prove anything. main() fails the run either way. Phase 2
 # drives this number to zero, without editing any of the three assertions.
-EXPECTED_XFAILS = 3
+EXPECTED_XFAILS = 2
 
 # The identities behind that count. A count alone cannot tell three defects
 # from three *different* defects: one fix landing early plus one regression
@@ -337,7 +338,7 @@ EXPECTED_XFAILS = 3
 # of the mechanism -- that a green line here is as significant as a red one --
 # quietly lost. Each xfail names which defect it stands for and main() compares
 # the set, so a swap cannot pass.
-EXPECTED_DEFECTS = {"FIX-01", "FIX-02", "FIX-03"}
+EXPECTED_DEFECTS = {"FIX-02", "FIX-03"}
 
 
 class Result:
@@ -496,9 +497,16 @@ def verify_run(active, state, res, path):
               "%s: instance %r" % (tag, run["instance"]))
     res.check(int(run["points"]) == active["points"],
               "%s: points %d != %d" % (tag, int(run["points"]), active["points"]))
-    res.check(int(run["phases_cleared"]) == active["point_events"],
+    # Re-derived from the raw text, never from anything the state machine
+    # produced: reaching 'Phase #N' means N-1 phases were cleared, and the
+    # completion closes the Nth, so the highest phase number the log shows is
+    # the count. A completed run whose log carries no phase line at all is the
+    # degenerate case -- the completion is then the only phase boundary, so
+    # exactly one phase was cleared.
+    want_cleared = max(active["phases"]) if active["phases"] else 1
+    res.check(int(run["phases_cleared"]) == want_cleared,
               "%s: phases %d != %d"
-              % (tag, int(run["phases_cleared"]), active["point_events"]))
+              % (tag, int(run["phases_cleared"]), want_cleared))
     res.check(bool(run["finished"]), "%s: not marked finished" % tag)
     res.check(run["finish_time"] is not None, "%s: no finish time" % tag)
 
@@ -591,7 +599,8 @@ def test_state_units(lua, parser, State):
     ])
     run = s5.snapshot(s5)
     res.check(int(run["points"]) == 84, "counted another player's points")
-    res.check(int(run["phases_cleared"]) == 1, "phases_cleared wrong")
+    res.check(int(run["phases_cleared"]) == 0,
+              "a points award moved the count of cleared phases on its own")
 
     # Recovery keeps a live run of the same instance rather than wiping it.
     s6 = new_state(lua, State)
@@ -717,11 +726,10 @@ def test_state_units(lua, parser, State):
     after_bonus = phases_cleared(f1, "once the bonus objective had paid out",
                                  absent=after_boss + 1)
 
-    res.xfail(after_bonus - after_boss == 0,
+    res.check(after_bonus - after_boss == 0,
               "counted a bonus objective payout as a cleared phase -- the "
               "window went from %d cleared to %d without a phase boss dying"
-              % (after_boss, after_bonus),
-              "FIX-01")
+              % (after_boss, after_bonus))
 
     # Both awards must still add up, so a fix that simply drops the second one
     # is caught rather than mistaken for the real thing.
@@ -730,6 +738,51 @@ def test_state_units(lua, parser, State):
     res.check(points == 84 + 30,
               "a points award went missing: %d instead of %d"
               % (points, 84 + 30))
+
+    # The same rule read three more ways, on shapes the log replay cannot
+    # produce on demand: a run watched from Begins! to Complete!, a payout
+    # with no phase behind it at all, and a run joined after three phases had
+    # already gone by.
+
+    f1a = new_state(lua, State)
+    feed(f1a, parser, [
+        "Incursion [Fort Ghelsba] Begins! (Normal)",
+        "Incursion [Fort Ghelsba] Phase #1 0/20",
+        "Godwen gains 84 incursion points.",
+        "Incursion [Fort Ghelsba] Phase #2 0/20",
+        "Godwen gains 91 incursion points.",
+        "Incursion [Fort Ghelsba] Complete! (Normal) Time: 12m 30s",
+    ])
+    run = f1a.snapshot(f1a)
+    res.check(int(run["phases_cleared"]) == 2,
+              "a two-phase run watched from Begins! to Complete! ended on %s "
+              "cleared phases -- the completion closes the final phase, whose "
+              "boss kill never produces a phase line of its own"
+              % run["phases_cleared"])
+    res.check(not run["points_partial"],
+              "a run watched from end to end was flagged as having missed "
+              "points awards")
+
+    f1b = new_state(lua, State)
+    feed(f1b, parser, [
+        "Incursion [Fort Ghelsba] Begins! (Normal)",
+        "Godwen gains 30 incursion points.",
+    ])
+    res.check(int(f1b.snapshot(f1b)["phases_cleared"]) == 0,
+              "a payout with no phase boundary behind it was counted as a "
+              "cleared phase: %s" % f1b.snapshot(f1b)["phases_cleared"])
+
+    f1c = new_state(lua, State)
+    feed(f1c, parser, [
+        "Incursion [Fort Ghelsba] Phase #4 3/15",
+    ])
+    run = f1c.snapshot(f1c)
+    res.check(int(run["phases_cleared"]) == 3,
+              "joining on phase 4 did not infer the three phases already "
+              "cleared: %s" % run["phases_cleared"])
+    res.check(bool(run["points_partial"]),
+              "joining on phase 4 having watched no award left the points "
+              "total unmarked, though three bosses paid out unseen")
 
     # --- FIX-02, as an expected failure -----------------------------------
 
@@ -1033,7 +1086,9 @@ def test_disconnect(lua, parser, State):
               "kept showing kill progress after the phase's boss died")
     res.check(int(run["points"]) == 84 + 149 + 192,
               "missed a points award we did see")
-    res.check(int(run["phases_cleared"]) == 3, "phases cleared wrong after a boss kill")
+    res.check(int(run["phases_cleared"]) == 2,
+              "a points award moved the count of cleared phases -- only the "
+              "next phase line does that")
 
     # --- A bonus that lapsed while we were away is dropped, not left at 0:00.
     lua.execute("__clock = 0")
@@ -1564,7 +1619,7 @@ Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocus
   TextColored good 'Complete 48m 44s'
   TextColored dim 'Phases cleared '
   SameLine
-  TextColored text '0'
+  TextColored text '1'
   SameLine
   SetCursorPosX 220
   TextColored dim 'Elapsed 48:44'

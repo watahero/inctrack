@@ -71,6 +71,9 @@ local function new_run(self, instance, difficulty)
         time_sync      = nil,
         started        = self:now(),
         points         = 0,
+        -- Our own points awards actually witnessed. Never displayed: it is
+        -- the yardstick for judging whether phases went by unseen.
+        awards_seen    = 0,
         phases_cleared = 0,
         finished       = false,
         finish_time    = nil,
@@ -197,8 +200,14 @@ function State:apply(e)
         -- kills that happened while we were gone.
         if e.phase and e.phase - 1 > run.phases_cleared then
             run.phases_cleared = e.phase - 1;
-            -- Those bosses awarded points we never saw, so the total we hold
-            -- is now a lower bound.
+        end
+
+        -- More phases behind us than awards we watched land: the bosses that
+        -- cleared the difference paid out to a window that was not listening,
+        -- so the points total we hold is a lower bound. Measured against the
+        -- awards witnessed rather than against the count above, which now
+        -- moves on every ordinary phase transition.
+        if e.phase and e.phase - 1 > run.awards_seen then
             run.points_partial = true;
         end
 
@@ -362,7 +371,7 @@ function State:apply(e)
             return false;
         end
         run.points         = run.points + e.amount;
-        run.phases_cleared = run.phases_cleared + 1;
+        run.awards_seen    = run.awards_seen + 1;
 
         -- A points award means a boss just died, so whatever phase progress we
         -- were showing is finished. While desynced that display is stale and
@@ -398,6 +407,12 @@ function State:apply(e)
     end
 
     if t == 'complete' then
+        -- The final phase's boss kill is never followed by a phase line -- the
+        -- run simply ends -- so the completion is what closes it. Guarded so a
+        -- repeated 'Complete!' inside the linger window cannot count twice.
+        if not run.finished then
+            run.phases_cleared = run.phases_cleared + 1;
+        end
         run.finished      = true;
         run.finish_time   = string.format('%dm %ds', e.minutes, e.seconds);
         run.elapsed_final = e.minutes * 60 + e.seconds;
@@ -545,6 +560,7 @@ function State:serialise()
         objective      = run.objective,
         next_boss      = run.next_boss,
         points         = run.points,
+        awards_seen    = run.awards_seen,
         phases_cleared = run.phases_cleared,
         finished       = run.finished,
         finish_time    = run.finish_time,
@@ -607,6 +623,10 @@ function State:restore(data)
     run.objective      = data.objective;
     run.next_boss      = data.next_boss;
     run.points         = data.points or 0;
+    -- A blob written by 1.1.0 has no awards counter, but back then the cleared
+    -- count was incremented by the very awards we are counting, so it is the
+    -- same number.
+    run.awards_seen    = data.awards_seen or data.phases_cleared or 0;
     run.phases_cleared = data.phases_cleared or 0;
     run.points_partial = data.points_partial or false;
     run.started        = now - (data.elapsed or 0);
