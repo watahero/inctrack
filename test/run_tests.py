@@ -2055,6 +2055,16 @@ def test_ui():
               "clicking close leaves the window on screen",
               "FIX-03")
 
+    # Pins which branch of that disjunction the fix took. Without this, a
+    # later change that reinstated the close box and then hid the window on
+    # the click would satisfy the check above through its other term, and the
+    # player would be back to a control they can never reach: the window is
+    # drawn with no title bar, so there is nowhere for a close box to appear.
+    res.check(not offered_close,
+              "the window asks for a close control it can never show -- it "
+              "is drawn without a title bar, so the player has nothing to "
+              "click")
+
     # No clock to reset at the end of this suite: every case above builds and
     # discards its own host, so nothing it advanced is shared with any other
     # suite -- which is why the eight existing report lines are unaffected.
