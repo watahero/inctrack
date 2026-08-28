@@ -71,7 +71,6 @@ local origin_x = 8;
 local ARG_SPACER    = { CONTENT_W, 1 };
 local ARG_BAR_MAIN  = { -1, BAR_MAIN };
 local ARG_BAR_THIN  = { -1, BAR_THIN };
-local ARG_OPEN      = { true };
 local ARG_PAD_TIGHT = { 4, 2 };   -- ItemSpacing while the window is open
 
 -- mm:ss, or h:mm:ss past an hour.
@@ -381,8 +380,10 @@ end
 * state -- the State instance
 * opts  -- { visible = bool, locked = bool }
 *
-* Returns the (possibly updated) visibility, so a click on the title bar's
-* close button propagates back to the caller.
+* Returns the visibility it was given. The window carries no close control
+* of its own -- it is drawn without a title bar, so there is nowhere to put
+* one. /incursion is the manual dismiss, and the linger after a run ends is
+* the automatic one.
 ]]--
 function ui.render(state, opts)
     local run = state:snapshot();
@@ -403,8 +404,7 @@ function ui.render(state, opts)
 
     imgui.PushStyleVar(ImGuiStyleVar_ItemSpacing, ARG_PAD_TIGHT);
 
-    ARG_OPEN[1] = true;
-    if imgui.Begin('inctrack###incursion_window', ARG_OPEN, flags) then
+    if imgui.Begin('inctrack###incursion_window', flags) then
         origin_x = imgui.GetCursorPosX();
         imgui.Dummy(ARG_SPACER);   -- pins the content width to CONTENT_W
 
@@ -423,10 +423,6 @@ function ui.render(state, opts)
 
     imgui.PopStyleVar(1);
 
-    -- The close button was clicked.
-    if not ARG_OPEN[1] then
-        return false;
-    end
     return opts.visible;
 end
 

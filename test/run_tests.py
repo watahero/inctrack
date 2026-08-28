@@ -33,21 +33,24 @@ Suites:
 ui.lua and inctrack.lua are reached through stubbed hosts (test/stubs.py);
 make_host() builds an isolated runtime with both installed.
 
-Three assertions are recorded as expected failures with Result.xfail, one per
+Three assertions were recorded as expected failures with Result.xfail, one per
 confirmed defect this milestone exists to fix. An expected failure asserts the
-behaviour the addon is *supposed* to have; the defect is why it is false
-today. They are counted like any other check, they print on their own marked
-lines, and they never make the run exit non-zero:
+behaviour the addon is *supposed* to have; the defect was why it was false.
+All three are fixed and are ordinary checks now:
 
-  * a bonus objective payout counted as a cleared phase   (suite 4)
-  * the run clock not aged by the time spent unloaded     (suite 4)
-  * the close button the window asks for and then ignores (suite 9)
+  * a bonus objective payout counted as a cleared phase   (suite 4, FIX-01)
+  * the run clock not aged by the time spent unloaded     (suite 4, FIX-02)
+  * the close button the window asks for and then ignores (suite 9, FIX-03)
 
-Each one names the defect it stands for (FIX-01..03), and main() guards both
-the total against EXPECTED_XFAILS and the set of names against
-EXPECTED_DEFECTS -- so a fourth failure, a swap of one defect for another, and
-a fix that landed before its red line could prove anything all fail the run.
-Phase 2 turns all three green without editing their assertions.
+Every one of them went green with its condition and its message byte-identical
+to what Phase 1 wrote: each was deliberately shaped as a delta, a tolerance
+window or a disjunction over both legitimate fixes, so that a *correct* fix
+satisfies it untouched.
+
+Result.xfail and the two report markers stay. main() guards both the total
+against EXPECTED_XFAILS and the set of names against EXPECTED_DEFECTS, and
+both are now empty -- so any new expected failure, and any regression that
+re-reddens a fixed line, fails the run.
 """
 
 import os
@@ -319,26 +322,28 @@ def extra_of(state):
 XFAIL_MARK = "XFAIL "
 FIXED_MARK = "NOW PASSING "
 
-# The confirmed defects still under test -- and nothing else. One is left:
+# The confirmed defects still under test -- and nothing else. None are left.
+# All three the milestone was opened to fix are fixed, and their lines are
+# ordinary checks now:
 #
-#   * the close button the window asks for and then ignores (ui suite)
+#   * FIX-01, a bonus objective payout counted as a cleared phase (state)
+#   * FIX-02, the run clock not aged by the time spent unloaded   (state)
+#   * FIX-03, the close button the window asks for and ignores    (ui)
 #
-# FIX-01 (a bonus objective payout counted as a cleared phase) and FIX-02 (the
-# run clock not aged by the time spent unloaded) are fixed, and their lines are
-# ordinary checks now.
-#
-# A second means something regressed; a missing one means a fix landed before
-# its red line could prove anything. main() fails the run either way. Phase 2
-# drives this number to zero, without editing any of the three assertions.
-EXPECTED_XFAILS = 1
+# Zero is the answer from here on, and it is guarded as strictly as three was.
+# Any expected failure at all means either a new defect was recorded without
+# this number being raised to admit it, or a fixed line went red again.
+# main() fails the run either way.
+EXPECTED_XFAILS = 0
 
 # The identities behind that count. A count alone cannot tell three defects
 # from three *different* defects: one fix landing early plus one regression
 # arriving leaves the total at three and the run green, with the whole point
 # of the mechanism -- that a green line here is as significant as a red one --
 # quietly lost. Each xfail names which defect it stands for and main() compares
-# the set, so a swap cannot pass.
-EXPECTED_DEFECTS = {"FIX-03"}
+# the set, so a swap cannot pass. Empty now, and an empty set is not a slack
+# one: main() compares the sorted lists, so any name at all mismatches [].
+EXPECTED_DEFECTS = set()
 
 
 class Result:
@@ -1524,7 +1529,7 @@ def first_diff(got, want):
 #    'Next:' line with a right-aligned location.
 WINDOW_MID_PHASE = expected_window("""
 PushStyleVar 13 [4, 2]
-Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+Begin 'inctrack###incursion_window' flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
   TextColored instance 'Crawlers' Nest Depths'
   SameLine
@@ -1558,7 +1563,7 @@ PopStyleVar 1
 #    kill line and its mob list are gone.
 WINDOW_BOSS_UP = expected_window("""
 PushStyleVar 13 [4, 2]
-Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+Begin 'inctrack###incursion_window' flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
   TextColored instance 'Crawlers' Nest Depths'
   SameLine
@@ -1585,7 +1590,7 @@ PopStyleVar 1
 #    objective has been announced, so the objective section says so.
 WINDOW_BONUS = expected_window("""
 PushStyleVar 13 [4, 2]
-Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+Begin 'inctrack###incursion_window' flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
   TextColored instance 'Crawlers' Nest Depths'
   SameLine
@@ -1634,7 +1639,7 @@ PopStyleVar 1
 #    the old phase's boss would be a lie.
 WINDOW_RECONNECTED = expected_window("""
 PushStyleVar 13 [4, 2]
-Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+Begin 'inctrack###incursion_window' flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
   TextColored instance 'Crawlers' Nest Depths'
   SameLine
@@ -1666,7 +1671,7 @@ PopStyleVar 1
 #    do-not-overprint branch at ui.lua:96-100.
 WINDOW_FINISHED = expected_window("""
 PushStyleVar 13 [4, 2]
-Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+Begin 'inctrack###incursion_window' flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
   TextColored instance 'Crawlers' Nest Depths'
   SameLine
@@ -1690,7 +1695,7 @@ PopStyleVar 1
 #    HARD-01 in Phase 3 and is deliberately not attempted here.
 WINDOW_PERCENT = expected_window("""
 PushStyleVar 13 [4, 2]
-Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+Begin 'inctrack###incursion_window' flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
   TextColored instance 'Vault 50% Sealed'
   SameLine
@@ -2012,14 +2017,15 @@ def test_ui():
         res.check(kept is visible,
                   "the window changed its own visibility with no run to show")
 
-    # --- FIX-03, as an expected failure -----------------------------------
+    # --- FIX-03, fixed ----------------------------------------------------
 
-    # Intended behaviour, not current behaviour: if the window offers a close
-    # control, clicking it closes the window. Stated as a disjunction over
-    # what the recorded Begin call shows, so either legitimate fix turns it
-    # green without this assertion being edited -- one where the window stops
-    # asking for a close control at all, and one where it starts drawing the
-    # bar that would carry it.
+    # If the window offers a close control, clicking it closes the window.
+    # Written in Phase 1 as a disjunction over what the recorded Begin call
+    # shows, so either legitimate fix would turn it green without the
+    # assertion being edited -- one where the window stops asking for a close
+    # control at all, and one where it starts drawing the bar that would carry
+    # it. Phase 2 took the first: the assertion below is unchanged from the
+    # day it was written red.
     close_host = make_host()
     close_parser = close_host.require("parser")
     CloseState = close_host.require("state")
@@ -2042,18 +2048,17 @@ def test_ui():
     offered_close = any(len(args) > 1 and stubs.lua_type(args[1]) == "table"
                         for args in begins)
 
-    # The xfail below is a disjunction whose first term holds whenever no
-    # Begin was recorded at all, so a frame that drew nothing would report the
-    # defect as fixed. Assert the precondition separately: the disjunction is
-    # only reached once a window is known to exist.
+    # The disjunction below holds whenever no Begin was recorded at all, so a
+    # frame that drew nothing would report the defect as fixed. Assert the
+    # precondition separately: the disjunction is only reached once a window
+    # is known to exist.
     res.check(bool(begins),
               "the close-button case drew no window at all, so nothing was "
               "proved about the close button either way")
 
-    res.xfail((not offered_close) or still_shown is False,
+    res.check((not offered_close) or still_shown is False,
               "the window asks for a close button and then ignores it -- "
-              "clicking close leaves the window on screen",
-              "FIX-03")
+              "clicking close leaves the window on screen")
 
     # Pins which branch of that disjunction the fix took. Without this, a
     # later change that reinstated the close box and then hid the window on
@@ -2611,23 +2616,23 @@ def main():
     for s in suites:
         ok &= s.report()
 
-    # Success criterion 4 of this phase: not "some things fail" but "these
-    # three, and nothing else, fail". The count is summed across every suite,
-    # and all three live in suites that always run, so this holds identically
+    # Not "some things fail" but "these, and nothing else, fail" -- and the
+    # set is now empty. The count is summed across every suite, and the suites
+    # that carried the three defects always run, so this holds identically
     # with and without chatlogs. Neither line printed here may contain either
     # report marker -- the phase criteria count those in this output.
     known = sum(len(s.xfails) for s in suites)
     still_red = [d for s in suites for d in s.xfail_ids]
     early = [d for s in suites for d in s.fixed_ids]
     print()
-    print("  %d known defects (expected until Phase 2)" % known)
+    print("  %d known defects" % known)
     if known != EXPECTED_XFAILS:
         print("  guard: this phase closes on exactly %d known defects; the "
               "run reported %d" % (EXPECTED_XFAILS, known))
         ok = False
     if sorted(still_red) != sorted(EXPECTED_DEFECTS):
         print("  guard: the failure list must be exactly %s; it is %s"
-              % (", ".join(sorted(EXPECTED_DEFECTS)),
+              % (", ".join(sorted(EXPECTED_DEFECTS)) or "empty",
                  ", ".join(sorted(still_red)) or "empty"))
         ok = False
     if early:

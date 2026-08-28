@@ -211,15 +211,10 @@ ashita.events.register('d3d_present', 'incursion_present', function ()
         return;
     end
 
-    local shown = ui.render(incursion.state, {
+    ui.render(incursion.state, {
         visible = true,
         locked  = incursion.settings.locked,
     });
-
-    -- Closing via the title bar counts as a manual hide.
-    if shown == false then
-        incursion.override = false;
-    end
 end);
 
 --[[
