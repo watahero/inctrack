@@ -14,8 +14,9 @@ Requirements: FIX-01, FIX-02, FIX-03.
 
 **The binding rule of this phase:** the three expected failures written in
 Phase 1 must go green **without their assertion text being edited**. They sit at
-`test/run_tests.py:654` (FIX-01), `:707` (FIX-02) and `:1937`/`:1773` region
-(FIX-03). Each was deliberately written as a delta, a tolerance window, or a
+`test/run_tests.py:720` (FIX-01), `:782` (FIX-02) and `:1942` (FIX-03), with
+FIX-03's `res.check(bool(begins), ...)` precondition at `:1937`. (The earlier
+citations of `:654`/`:707` predate the Phase-1 review fixes and are stale.) Each was deliberately written as a delta, a tolerance window, or a
 disjunction over both legitimate fixes, precisely so that a correct fix satisfies
 it untouched. Editing an assertion to make it pass would destroy the ordering
 guarantee the whole milestone is built on. Each fix must also decrement
