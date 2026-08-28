@@ -55,6 +55,7 @@ import re
 import sys
 import glob
 import importlib
+import traceback
 
 import lupa
 
@@ -665,6 +666,24 @@ def test_state_units(lua, parser, State):
     # advances the count of cleared phases. Measured as deltas rather than as
     # one absolute number, so any single-author scheme Phase 2 chooses
     # satisfies it without this assertion being edited.
+
+    def phases_cleared(state, when, absent):
+        """The count the window would show, with a vanished run reported
+        rather than raised.
+
+        Result.check accumulates rather than aborting -- that is its contract.
+        But `int(state.snapshot(state)["phases_cleared"])` raises if the
+        snapshot is nil, and a raise here takes the whole run down before any
+        suite reports or the known-defect guard runs: a named state regression
+        would surface as an unhandled traceback instead of a named failure.
+        `absent` is chosen at each call site so the assertion that follows
+        still fails rather than accidentally passing on a sentinel.
+        """
+        snap = state.snapshot(state)
+        res.check(snap is not None,
+                  "the run had vanished from the window %s" % when)
+        return int(snap["phases_cleared"]) if snap is not None else absent
+
     f1 = new_state(lua, State)
     feed(f1, parser, [
         "Incursion [Fort Ghelsba] Begins! (Normal)",
@@ -674,7 +693,7 @@ def test_state_units(lua, parser, State):
         # check red against a correct implementation.
         "Incursion [Fort Ghelsba] Phase #1 7/20",
     ])
-    at_start = int(f1.snapshot(f1)["phases_cleared"])
+    at_start = phases_cleared(f1, "on its first phase message", absent=-1)
     res.check(at_start == 0,
               "the first phase of a run was reported as one already cleared: "
               "%d" % at_start)
@@ -683,7 +702,8 @@ def test_state_units(lua, parser, State):
         "Godwen gains 84 incursion points.",
         "Incursion [Fort Ghelsba] Phase #2 0/20",
     ])
-    after_boss = int(f1.snapshot(f1)["phases_cleared"])
+    after_boss = phases_cleared(f1, "once the phase boss had died",
+                                absent=at_start)
     res.check(after_boss - at_start == 1,
               "killing the phase boss did not move the count of cleared "
               "phases by exactly one (%d -> %d)" % (at_start, after_boss))
@@ -694,7 +714,8 @@ def test_state_units(lua, parser, State):
         "Incursion [Fort Ghelsba] Bonus Objective Complete!",
         "Godwen gains 30 incursion points.",
     ])
-    after_bonus = int(f1.snapshot(f1)["phases_cleared"])
+    after_bonus = phases_cleared(f1, "once the bonus objective had paid out",
+                                 absent=after_boss + 1)
 
     res.xfail(after_bonus - after_boss == 0,
               "counted a bonus objective payout as a cleared phase -- the "
@@ -704,9 +725,11 @@ def test_state_units(lua, parser, State):
 
     # Both awards must still add up, so a fix that simply drops the second one
     # is caught rather than mistaken for the real thing.
-    res.check(int(f1.snapshot(f1)["points"]) == 84 + 30,
+    snap = f1.snapshot(f1)
+    points = int(snap["points"]) if snap is not None else -1
+    res.check(points == 84 + 30,
               "a points award went missing: %d instead of %d"
-              % (int(f1.snapshot(f1)["points"]), 84 + 30))
+              % (points, 84 + 30))
 
     # --- FIX-02, as an expected failure -----------------------------------
 
@@ -741,12 +764,18 @@ def test_state_units(lua, parser, State):
     blob["saved_at"] = blob["saved_at"] - GAP
 
     f3 = new_state(lua, State)
-    res.check(bool(f3.restore(f3, blob)),
+    restored = bool(f3.restore(f3, blob))
+    res.check(restored,
               "a run saved ten minutes ago was thrown away as too old")
 
-    back_left = float(f3.time_left(f3))
-    back_elapsed = float(f3.elapsed(f3))
-    back_bonus = f3.bonus(f3)
+    # Guarded for the same reason as the snapshot reads above: a refusal to
+    # restore makes every accessor below return nil, and float(None) raises
+    # before this suite can report anything. The stand-ins are chosen so the
+    # expected failure below still records a failure -- a state regression is
+    # not a fix.
+    back_left = float(f3.time_left(f3)) if restored else 0.0
+    back_elapsed = float(f3.elapsed(f3)) if restored else 0.0
+    back_bonus = f3.bonus(f3) if restored else False
 
     # Two seconds of tolerance on the clock comparisons: the stamp is real
     # wall time and a second can tick between the save and the restore.
@@ -2391,6 +2420,35 @@ def test_addon_shell():
     return res
 
 
+def run_suite(label, fn, *args):
+    """Run one suite, turning a crash into a reported failure.
+
+    Result.check accumulates rather than aborting -- that is its contract --
+    but a Lua accessor that returns nil after a state regression makes the
+    *Python* dereference raise, and an uncaught raise takes every other
+    suite's report and the known-defect guard down with it. A named regression
+    would surface as a traceback with no report at all, which is the one
+    outcome that makes the whole-suite guarantee unanswerable.
+
+    A suite that dies is a red suite, not a missing one: the run still
+    reports, the exit code is still non-zero, and the guard still notices that
+    a named defect stopped being counted. The traceback goes to stderr so
+    nothing is lost.
+
+    Returns a list, because the parser suites come in pairs.
+    """
+    try:
+        out = fn(*args)
+    except Exception as exc:                              # noqa: BLE001
+        traceback.print_exc()
+        broken = Result("%s: the suite did not finish" % label)
+        broken.check(False,
+                     "the suite stopped early and proved nothing past that "
+                     "point: %s: %s" % (type(exc).__name__, exc))
+        return [broken]
+    return [out] if isinstance(out, Result) else list(out)
+
+
 def main():
     logdir = find_logs()
     libs = find_ashita_libs(logdir)
@@ -2409,20 +2467,24 @@ def main():
         print("  chatlogs: %s" % logdir)
         print("  %d chat lines from %d logs, character %s" % (
             len(lines), len(set(l[0] for l in lines)), player))
-        suites.extend(test_parser(lines, parser))
-        suites.append(test_replay(lines, lua, parser, State, player))
+        suites.extend(run_suite("parser", test_parser, lines, parser))
+        suites.extend(run_suite("run reconstruction", test_replay,
+                                lines, lua, parser, State, player))
     else:
         print("  chatlogs: none (pass a directory or set INCURSION_CHATLOGS "
               "to replay real runs)")
     print()
 
-    suites.append(test_state_units(lua, parser, State))
-    suites.append(test_future_content(lua, parser, State))
-    suites.append(test_disconnect(lua, parser, State))
-    suites.append(test_timers(lua, parser, State))
-    suites.append(test_json_roundtrip(lua, parser, State, libs))
-    suites.append(test_ui())
-    suites.append(test_addon_shell())
+    suites.extend(run_suite("state", test_state_units, lua, parser, State))
+    suites.extend(run_suite("adaptability", test_future_content,
+                            lua, parser, State))
+    suites.extend(run_suite("disconnect", test_disconnect,
+                            lua, parser, State))
+    suites.extend(run_suite("timers", test_timers, lua, parser, State))
+    suites.extend(run_suite("persistence", test_json_roundtrip,
+                            lua, parser, State, libs))
+    suites.extend(run_suite("ui", test_ui))
+    suites.extend(run_suite("addon", test_addon_shell))
 
     ok = True
     for s in suites:
