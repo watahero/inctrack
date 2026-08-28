@@ -80,35 +80,36 @@ Deferred to a future milestone. Acknowledged, not in this roadmap.
 
 ## Traceability
 
-Populated during roadmap creation.
+Populated during roadmap creation (2026-08-29). See `.planning/ROADMAP.md` for phase goals and success criteria.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| COVR-01 | TBD | Pending |
-| COVR-02 | TBD | Pending |
-| COVR-03 | TBD | Pending |
-| COVR-04 | TBD | Pending |
-| FIX-01 | TBD | Pending |
-| FIX-02 | TBD | Pending |
-| FIX-03 | TBD | Pending |
-| HARD-01 | TBD | Pending |
-| HARD-02 | TBD | Pending |
-| HARD-03 | TBD | Pending |
-| HARD-04 | TBD | Pending |
-| HARD-05 | TBD | Pending |
-| HARD-06 | TBD | Pending |
-| PERF-01 | TBD | Pending |
-| PERF-02 | TBD | Pending |
-| PERF-03 | TBD | Pending |
-| PERF-04 | TBD | Pending |
-| DOC-01 | TBD | Pending |
-| DOC-02 | TBD | Pending |
+| COVR-01 | Phase 1 | Pending |
+| COVR-02 | Phase 1 | Pending |
+| COVR-03 | Phase 1 | Pending |
+| COVR-04 | Phase 1 | Pending |
+| FIX-01 | Phase 2 | Pending |
+| FIX-02 | Phase 2 | Pending |
+| FIX-03 | Phase 2 | Pending |
+| HARD-01 | Phase 3 | Pending |
+| HARD-02 | Phase 3 | Pending |
+| HARD-03 | Phase 3 | Pending |
+| HARD-04 | Phase 3 | Pending |
+| HARD-05 | Phase 3 | Pending |
+| HARD-06 | Phase 3 | Pending |
+| PERF-01 | Phase 4 | Pending |
+| PERF-02 | Phase 4 | Pending |
+| PERF-03 | Phase 4 | Pending |
+| PERF-04 | Phase 4 | Pending |
+| DOC-01 | Phase 4 | Pending |
+| DOC-02 | Phase 4 | Pending |
 
 **Coverage:**
 - v1 requirements: 19 total
-- Mapped to phases: 0 ⚠️
-- Unmapped: 19 ⚠️
+- Mapped to phases: 19 ✓
+- Unmapped: 0 ✓
+- Orphans: none. Duplicates: none.
 
 ---
 *Requirements defined: 2026-08-29*
-*Last updated: 2026-08-29 after initial definition*
+*Last updated: 2026-08-29 after roadmap creation — traceability populated*
