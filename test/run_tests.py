@@ -1080,6 +1080,206 @@ def test_json_roundtrip(lua, parser, State, libs):
     return res
 
 
+# --------------------------------------------------------------------------
+# 7. ui: the pure helpers and the layout contracts they hold up
+# --------------------------------------------------------------------------
+
+def rgba(color):
+    """A Lua colour table as a comparable tuple.
+
+    Every read of a Lua table hands back a fresh proxy, so two handles on the
+    same COLOR entry never compare equal with `==`. Compare components.
+    """
+    return tuple(round(float(color[i]), 4) for i in range(1, 5))
+
+
+def test_ui():
+    """ui.lua, against the recording ImGui stub.
+
+    Reads no chatlogs and needs no Ashita install (COVR-04): every fixture
+    below is written out here.
+    """
+    res = Result("ui: helpers, layout contract, render")
+
+    host = make_host()
+    ui = host.require("ui")
+    rec = host.imgui
+
+    # ui.lua exports ui.render and nothing else -- every helper below is a
+    # file-scope local -- and this phase adds coverage without editing a byte
+    # under inctrack/. Upvalue reflection is therefore the only way to reach
+    # them; see lua_locals.
+    L = lua_locals(host, ui.render)
+    clock_str = L["clock_str"]
+    right_text = L["right_text"]
+    wrapped = L["wrapped"]
+    bar = L["bar"]
+    urgency = L["urgency"]
+    replace_plain = L["replace_plain"]
+    shorten = L["shorten"]
+    STAT_SHORT = L["STAT_SHORT"]
+    COLOR = L["COLOR"]
+
+    # CONTENT_W and origin_x come from the same walk rather than being copied
+    # into the test, because the right-alignment assertions below are stated
+    # against origin_x + CONTENT_W and a copy would stop tracking the addon.
+    # Read here, before any render call, origin_x is still ui.lua's file
+    # default of 8 (ui.lua:67) -- it is only rewritten inside Begin
+    # (ui.lua:408). That is correct for the direct-call tests in this section,
+    # which never go through render; the snapshot cases further down do go
+    # through Begin and see the stub's cursor instead.
+    CONTENT_W = float(L["CONTENT_W"])
+    origin_x = float(L["origin_x"])
+    right_edge = origin_x + CONTENT_W
+
+    def recorded(name):
+        """Every recorded call of one entry point, as a list of arg tuples."""
+        return [args for n, args in rec.calls if n == name]
+
+    # --- clock_str: the only thing that formats a duration for the window ---
+
+    res.check(clock_str(None) == "--:--",
+              "a time the addon does not know yet drew as a real clock "
+              "instead of a placeholder: %r" % clock_str(None))
+
+    for seconds, want in [(0, "0:00"), (59, "0:59"), (60, "1:00"),
+                          (599, "9:59")]:
+        got = clock_str(seconds)
+        res.check(got == want,
+                  "a countdown of %d seconds read as %r on screen, not %r"
+                  % (seconds, got, want))
+
+    for seconds, want in [(3600, "1:00:00"), (3661, "1:01:01"),
+                          (5400, "1:30:00")]:
+        got = clock_str(seconds)
+        res.check(got == want,
+                  "an instance with over an hour left read as %r, losing the "
+                  "hour" % got)
+
+    res.check(clock_str(90.9) == "1:30",
+              "the clock rounded up and showed a second that has not passed "
+              "yet: %r" % clock_str(90.9))
+
+    # --- urgency: the colour that makes a nearly-expired timer obvious ---
+
+    for seconds, want, symptom in [
+        (None, "dim", "a timer the addon has no value for was coloured as if "
+                      "it were a live reading"),
+        (301, "text", "a timer with five minutes left was already shouting"),
+        (300, "warn", "a timer entering its last five minutes stayed in the "
+                      "ordinary colour"),
+        (61, "warn", "a timer about to enter its last minute stayed in the "
+                     "ordinary colour"),
+        (60, "bad", "a timer down to its last minute was not drawn in the "
+                    "alarm colour"),
+        (0, "bad", "an expired timer was not drawn in the alarm colour"),
+    ]:
+        res.check(rgba(urgency(seconds, 300, 60)) == rgba(COLOR[want]),
+                  "%s (%s seconds)" % (symptom, seconds))
+
+    # --- replace_plain: literal text, not a Lua pattern ---
+
+    res.check(replace_plain("a.b acb", ".", "!") == "a!b acb",
+              "a stat phrase containing a dot matched text that merely sits "
+              "in the same position: %r"
+              % replace_plain("a.b acb", ".", "!"))
+    res.check(replace_plain("aXbXc", "X", "-") == "a-b-c",
+              "only the first occurrence of a stat phrase was shortened: %r"
+              % replace_plain("aXbXc", "X", "-"))
+
+    # --- shorten: boon stats in the shorthand the layout is sized for ---
+
+    res.check(shorten("WS Accuracy+15 / Store TP+8") == "WS Acc+15 STP+8",
+              "a boon's stats did not shorten to the abbreviations the boon "
+              "row is sized for: %r" % shorten("WS Accuracy+15 / Store TP+8"))
+    res.check(shorten("R.Accuracy+10 / Accuracy+20") == "RAcc+10 Acc+20",
+              "ranged accuracy was shortened as if it were melee accuracy: %r"
+              % shorten("R.Accuracy+10 / Accuracy+20"))
+    res.check(shorten("Regen +2 / Refresh +1") == "Regen+2 Refresh+1",
+              "a boon stat the shorthand table has never seen was mangled "
+              "instead of shown as the server wrote it: %r"
+              % shorten("Regen +2 / Refresh +1"))
+    once = shorten("Cure Potency+10 / Fast Cast+5")
+    res.check(shorten("Cure Potency+10 / Fast Cast+5") == once,
+              "the same boon read differently on the second frame it was "
+              "drawn: %r then %r"
+              % (once, shorten("Cure Potency+10 / Fast Cast+5")))
+
+    # --- bar, right_text and wrapped draw, so read the recorded calls ---
+
+    rec.reset()
+    bar(-0.5, COLOR["bar_kills"], L["ARG_BAR_MAIN"], "under")
+    under = recorded("ProgressBar")
+    res.check(len(under) == 1 and float(under[0][0]) == 0.0,
+              "a progress bar drew backwards past its left end: %r"
+              % (under and under[0][0],))
+
+    rec.reset()
+    bar(1.7, COLOR["bar_kills"], L["ARG_BAR_MAIN"], "over")
+    over = recorded("ProgressBar")
+    res.check(len(over) == 1 and float(over[0][0]) == 1.0,
+              "a progress bar drew past its right end: %r"
+              % (over and over[0][0],))
+    res.check(len(recorded("PushStyleColor"))
+              == sum(int(a[0]) for a in recorded("PopStyleColor")),
+              "a bar left a colour pushed on the stack, so everything drawn "
+              "after it takes that bar's colour")
+
+    label = "9:59"
+    rec.reset()
+    width = float(rec.api.CalcTextSize(label))   # the stub's own metric
+    rec.reset()
+    right_text(label, COLOR["text"])
+    moved = recorded("SetCursorPosX")
+    res.check(len(moved) == 1
+              and abs(float(moved[0][0]) - (right_edge - width)) < 0.001,
+              "a right-aligned value did not finish flush with the right edge "
+              "of the window: %r, wanted %r"
+              % (moved and moved[0][0], right_edge - width))
+
+    # The left side of the line already runs past where the value would start:
+    # it must sit after the text rather than printing on top of it
+    # (ui.lua:96-100).
+    rec.reset()
+    rec.api.TextColored(COLOR["text"], "x" * 60)
+    right_text(label, COLOR["text"])
+    res.check(not recorded("SetCursorPosX"),
+              "a long line and its right-aligned value printed on top of one "
+              "another")
+    res.check(len(recorded("TextColored")) == 2,
+              "a right-aligned value was dropped when the line ran long")
+
+    rec.reset()
+    wrapped("some overlong mob list", COLOR["dim"])
+    wraps = recorded("PushTextWrapPos")
+    res.check(len(wraps) == 1
+              and abs(float(wraps[0][0]) - right_edge) < 0.001,
+              "wrapped text wrapped somewhere other than the window's pinned "
+              "content width: %r, wanted %r"
+              % (wraps and wraps[0][0], right_edge))
+    res.check(len(wraps) == len(recorded("PopTextWrapPos")),
+              "wrapped text left the wrap position pushed, so every later "
+              "line wrapped too")
+
+    # --- STAT_SHORT's ordering contract (ui.lua:286-292) ---
+
+    # Longer phrases must be listed before their own substrings, or the
+    # substring replaces first and the longer phrase can never match whole.
+    # This is exactly the table a later edit re-sorts alphabetically.
+    phrases = [STAT_SHORT[i][1] for i in range(1, len(STAT_SHORT) + 1)]
+    offenders = [(phrases[a], phrases[b])
+                 for a in range(len(phrases))
+                 for b in range(a + 1, len(phrases))
+                 if phrases[a] in phrases[b]]
+    res.check(not offenders,
+              "boon stats would shorten to the wrong abbreviation: %r is "
+              "listed before %r, which contains it, so the longer phrase can "
+              "never match whole"
+              % (offenders[0] if offenders else ("", "")))
+
+    return res
+
+
 def main():
     logdir = find_logs()
     libs = find_ashita_libs(logdir)
@@ -1107,6 +1307,7 @@ def main():
     suites.append(test_disconnect(lua, parser, State))
     suites.append(test_timers(lua, parser, State))
     suites.append(test_json_roundtrip(lua, parser, State, libs))
+    suites.append(test_ui())
 
     ok = True
     for s in suites:
