@@ -1796,6 +1796,14 @@ def test_ui():
     offered_close = any(len(args) > 1 and stubs.lua_type(args[1]) == "table"
                         for args in begins)
 
+    # The xfail below is a disjunction whose first term holds whenever no
+    # Begin was recorded at all, so a frame that drew nothing would report the
+    # defect as fixed. Assert the precondition separately: the disjunction is
+    # only reached once a window is known to exist.
+    res.check(bool(begins),
+              "the close-button case drew no window at all, so nothing was "
+              "proved about the close button either way")
+
     res.xfail((not offered_close) or still_shown is False,
               "the window asks for a close button and then ignores it -- "
               "clicking close leaves the window on screen")
