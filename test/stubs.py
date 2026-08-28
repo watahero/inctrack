@@ -16,7 +16,9 @@ This module is imported by `test/run_tests.py` and is never run directly --
 `python test/run_tests.py` stays the single entry point. It has no CLI.
 
 Contents:
-  * install_imgui(lua)  -- a recording ImGui stub; returns an ImGuiRecorder
+  * install_imgui(lua)     -- a recording ImGui stub; returns an ImGuiRecorder
+  * install_ashita(lua)    -- the in-memory Ashita fakes plus a pure-Lua json;
+                              returns an AshitaHost
 """
 
 import lupa
@@ -431,3 +433,585 @@ def install_imgui(lua):
     resolves to it, and sets the ImGui* enum globals ui.render reads.
     """
     return ImGuiRecorder(lua)
+
+
+# --------------------------------------------------------------------------
+# The Ashita host fakes, and a pure-Lua json
+# --------------------------------------------------------------------------
+
+# Fixed wall-clock epoch (2026-01-01 00:00:00 UTC). Seeding os.time() at a
+# constant is what makes a serialised blob reproducible from run to run.
+EPOCH = 1767225600
+
+ASHITA_CHUNK = """
+--[[
+* In-memory Ashita host fakes -- not strict mocks. Tests assert on the
+* behaviour that results, so a refactor inside the addon does not produce a
+* false failure.
+]]--
+
+--[[
+* Deterministic clocks. state.lua deliberately mixes two of them with
+* different epochs: the monotonic clock drives every run timer through the
+* now() at inctrack.lua:80 (os.clock resets on reload, so timers serialise as
+* remaining durations), while the os.time() wall clock is what `saved_at` and
+* the staleness check in State:restore compare. Both are stubbed, and
+* separately, so a test can age one without the other.
+*
+* Both values are seeded from Python; see stubs.EPOCH.
+]]--
+__host_epoch = 0;
+__host_mono  = 0;
+__host_wall  = 0;
+
+os.clock = function () return __host_mono; end
+os.time  = function () return __host_wall; end
+
+-- The five addon.* assignments at inctrack.lua:20-24 need somewhere to land.
+addon = {};
+
+-- Ashita's common.lua prelude table constructor; a passthrough is all the
+-- addon asks of it, exactly as suite 8 already does at run_tests.py:842.
+function T(t)
+    return t or {};
+end
+
+__host_events  = {};
+__host_aliases = {};
+
+ashita = {
+    events = {
+        register = function (event, alias, fn)
+            __host_events[event] = fn;
+            __host_aliases[event] = alias;
+        end,
+    },
+};
+
+--[[
+* AshitaCore:GetMemoryManager():GetParty():GetMemberName(0) -- inctrack.lua:127
+* and :177. These are colon calls, so every method takes its receiver
+* explicitly. The name starts empty so the deferred-fetch path at
+* inctrack.lua:176-181 is exercisable; Python supplies one later.
+]]--
+__host_player = '';
+
+local party = {};
+function party.GetMemberName(self, index)
+    return __host_player;
+end
+
+local memory = {};
+function memory.GetParty(self)
+    return party;
+end
+
+AshitaCore = {};
+function AshitaCore.GetMemoryManager(self)
+    return memory;
+end
+
+-- Console output is captured rather than written, so the host touches no
+-- stdout state of the harness it is embedded in.
+__host_chat = {};
+print = function (...)
+    local parts = {};
+    for i = 1, select('#', ...) do
+        parts[i] = tostring((select(i, ...)));
+    end
+    __host_chat[#__host_chat + 1] = table.concat(parts, '\\t');
+end
+
+-- require('common') at inctrack.lua:26 is for side effects only.
+package.loaded['common'] = {};
+
+package.loaded['chat'] = {
+    header  = function (name) return '[' .. tostring(name) .. '] '; end,
+    message = function (text) return tostring(text); end,
+};
+
+--[[
+* settings. Nothing is written to disk: save() counts the write and records
+* what would have been written, which is what a test needs to see.
+]]--
+__host_profile     = nil;   -- Python-supplied overrides for the next load()
+__host_defaults    = nil;
+__host_settings    = nil;
+__host_saves       = 0;
+__host_sessions    = {};
+__host_settings_cb = nil;
+
+local function merged(defaults, over)
+    local out = {};
+    if type(defaults) == 'table' then
+        for k, v in pairs(defaults) do out[k] = v; end
+    end
+    if type(over) == 'table' then
+        for k, v in pairs(over) do out[k] = v; end
+    end
+    return out;
+end
+
+package.loaded['settings'] = {
+    load = function (defaults)
+        __host_defaults = defaults;
+        __host_settings = merged(defaults, __host_profile);
+        return __host_settings;
+    end,
+    save = function ()
+        __host_saves = __host_saves + 1;
+        local session = __host_settings and __host_settings.session or '';
+        __host_sessions[#__host_sessions + 1] = tostring(session);
+    end,
+    register = function (name, alias, fn)
+        __host_settings_cb = fn;
+    end,
+};
+
+-- Fire the profile-switch callback registered at inctrack.lua:281 with a new
+-- settings table, as a character change does.
+function __host_switch(over)
+    __host_settings = merged(__host_defaults, over);
+    if __host_settings_cb ~= nil then
+        __host_settings_cb(__host_settings);
+    end
+    return __host_settings;
+end
+
+--[[
+* string:strip_colors() -- inctrack.lua:167. Ashita's two colour-code escape
+* forms are a marker byte followed by one payload byte. The call counter is
+* free now and is what PERF-01 measures in Phase 4.
+]]--
+__host_strip_calls = 0;
+
+function string.strip_colors(s)
+    __host_strip_calls = __host_strip_calls + 1;
+    local out = tostring(s):gsub('\\30.', '');
+    out = out:gsub('\\31.', '');
+    return out;
+end
+
+-- string:args() -- inctrack.lua:229. '/inc reset' -> { '/inc', 'reset' },
+-- 1-indexed, so args[1] and args[2] behave as they do in game.
+function string.args(s)
+    local out = {};
+    for word in tostring(s):gmatch('%S+') do
+        out[#out + 1] = word;
+    end
+    return out;
+end
+"""
+
+JSON_CHUNK = """
+--[[
+* A stubbed pure-Lua json, so the new suites need no Ashita install (D-04).
+* Suite 8 keeps round-tripping the save format through Ashita's own json.lua;
+* that suite's whole purpose is the real thing, and this stub is never put
+* anywhere the shared runtime from make_lua() can see it.
+*
+* The decoder scans its input character by character. It never hands the text
+* to load(), loadstring() or dofile(): a decoder that evaluates its input is a
+* code execution path in the harness (T-01-01), and it would also silently
+* accept non-JSON such as {a=1}.
+]]--
+
+local json = {};
+
+local ESCAPES = {
+    ['"']  = '\\\\"',
+    ['\\\\'] = '\\\\\\\\',
+    ['\\b'] = '\\\\b',
+    ['\\f'] = '\\\\f',
+    ['\\n'] = '\\\\n',
+    ['\\r'] = '\\\\r',
+    ['\\t'] = '\\\\t',
+};
+
+--[[
+* Bytes >= 0x80 are emitted raw rather than escaped. Real logs carry raw high
+* bytes inside boon names, and \\u escaping them would decode back to a
+* codepoint rather than the byte, breaking the round trip this stub exists to
+* provide.
+]]--
+local function quote(s)
+    local out = s:gsub('[%c"\\\\]', function (c)
+        return ESCAPES[c] or string.format('\\\\u%04x', string.byte(c));
+    end);
+    return '"' .. out .. '"';
+end
+
+local function numstr(v)
+    if v ~= v or v == math.huge or v == -math.huge then
+        error('json.encode: cannot encode ' .. tostring(v));
+    end
+    if math.type ~= nil then
+        if math.type(v) == 'integer' then
+            return string.format('%d', v);
+        end
+    elseif v == math.floor(v) then
+        return string.format('%d', v);
+    end
+    return string.format('%.14g', v);
+end
+
+local encode_value;
+
+encode_value = function (v, depth)
+    local kind = type(v);
+    if v == nil then
+        return 'null';
+    end
+    if kind == 'boolean' then
+        return v and 'true' or 'false';
+    end
+    if kind == 'number' then
+        return numstr(v);
+    end
+    if kind == 'string' then
+        return quote(v);
+    end
+    if kind ~= 'table' then
+        error('json.encode: cannot encode a ' .. kind);
+    end
+    if depth > 64 then
+        error('json.encode: nesting too deep');
+    end
+
+    local parts = {};
+
+    -- An array when its length is non-zero, an object otherwise. State's
+    -- `boons` and `objective.mobs` are arrays; `extra` is string-keyed.
+    if #v > 0 then
+        for i = 1, #v do
+            parts[i] = encode_value(v[i], depth + 1);
+        end
+        return '[' .. table.concat(parts, ',') .. ']';
+    end
+
+    local keys = {};
+    for k in pairs(v) do
+        keys[#keys + 1] = k;
+    end
+    -- Sorted so the output is reproducible; JSON object order carries no
+    -- meaning either way.
+    table.sort(keys, function (a, b) return tostring(a) < tostring(b); end);
+    for i = 1, #keys do
+        parts[i] = quote(tostring(keys[i])) .. ':'
+            .. encode_value(v[keys[i]], depth + 1);
+    end
+    return '{' .. table.concat(parts, ',') .. '}';
+end
+
+function json.encode(v)
+    return encode_value(v, 0);
+end
+
+function json.decode(text)
+    if type(text) ~= 'string' then
+        error('json.decode: expected a string, got ' .. type(text));
+    end
+
+    local pos = 1;
+    local last = #text;
+
+    local function fail(msg)
+        error('json.decode: ' .. msg .. ' at offset ' .. tostring(pos));
+    end
+
+    local function skip()
+        while pos <= last do
+            local c = text:sub(pos, pos);
+            if c == ' ' or c == '\\t' or c == '\\n' or c == '\\r' then
+                pos = pos + 1;
+            else
+                break;
+            end
+        end
+    end
+
+    local function parse_string()
+        pos = pos + 1;   -- the opening quote
+        local buf = {};
+        while true do
+            if pos > last then
+                fail('unterminated string');
+            end
+            local c = text:sub(pos, pos);
+            if c == '"' then
+                pos = pos + 1;
+                return table.concat(buf);
+            end
+            if c == '\\\\' then
+                local e = text:sub(pos + 1, pos + 1);
+                pos = pos + 2;
+                if e == 'n' then buf[#buf + 1] = '\\n';
+                elseif e == 't' then buf[#buf + 1] = '\\t';
+                elseif e == 'r' then buf[#buf + 1] = '\\r';
+                elseif e == 'b' then buf[#buf + 1] = '\\b';
+                elseif e == 'f' then buf[#buf + 1] = '\\f';
+                elseif e == '/' then buf[#buf + 1] = '/';
+                elseif e == '"' then buf[#buf + 1] = '"';
+                elseif e == '\\\\' then buf[#buf + 1] = '\\\\';
+                elseif e == 'u' then
+                    local hex = text:sub(pos, pos + 3);
+                    if #hex < 4 or hex:find('%X') ~= nil then
+                        fail('bad \\\\u escape');
+                    end
+                    local code = tonumber(hex, 16);
+                    pos = pos + 4;
+                    if code < 256 then
+                        buf[#buf + 1] = string.char(code);
+                    else
+                        -- The encoder never emits these; do not invent an
+                        -- encoding for one that arrived from elsewhere.
+                        buf[#buf + 1] = '?';
+                    end
+                else
+                    fail('bad escape');
+                end
+            else
+                buf[#buf + 1] = c;
+                pos = pos + 1;
+            end
+        end
+    end
+
+    local function parse_number()
+        local start = pos;
+        while pos <= last do
+            if text:sub(pos, pos):find('[%d%+%-%.eE]') ~= nil then
+                pos = pos + 1;
+            else
+                break;
+            end
+        end
+        local raw = text:sub(start, pos - 1);
+        local v = tonumber(raw);
+        if v == nil then
+            pos = start;
+            fail('bad number');
+        end
+        return v;
+    end
+
+    local parse_value;
+
+    parse_value = function (depth)
+        if depth > 64 then
+            fail('nesting too deep');
+        end
+        skip();
+        if pos > last then
+            fail('unexpected end of input');
+        end
+        local c = text:sub(pos, pos);
+
+        if c == '{' then
+            pos = pos + 1;
+            local out = {};
+            skip();
+            if text:sub(pos, pos) == '}' then
+                pos = pos + 1;
+                return out;
+            end
+            while true do
+                skip();
+                if text:sub(pos, pos) ~= '"' then
+                    fail('expected a quoted key');
+                end
+                local key = parse_string();
+                skip();
+                if text:sub(pos, pos) ~= ':' then
+                    fail('expected :');
+                end
+                pos = pos + 1;
+                out[key] = parse_value(depth + 1);
+                skip();
+                local d = text:sub(pos, pos);
+                if d == ',' then
+                    pos = pos + 1;
+                elseif d == '}' then
+                    pos = pos + 1;
+                    return out;
+                else
+                    fail('expected , or }');
+                end
+            end
+        end
+
+        if c == '[' then
+            pos = pos + 1;
+            local out = {};
+            skip();
+            if text:sub(pos, pos) == ']' then
+                pos = pos + 1;
+                return out;
+            end
+            local i = 1;
+            while true do
+                out[i] = parse_value(depth + 1);
+                i = i + 1;
+                skip();
+                local d = text:sub(pos, pos);
+                if d == ',' then
+                    pos = pos + 1;
+                elseif d == ']' then
+                    pos = pos + 1;
+                    return out;
+                else
+                    fail('expected , or ]');
+                end
+            end
+        end
+
+        if c == '"' then
+            return parse_string();
+        end
+        if text:sub(pos, pos + 3) == 'true' then
+            pos = pos + 4;
+            return true;
+        end
+        if text:sub(pos, pos + 4) == 'false' then
+            pos = pos + 5;
+            return false;
+        end
+        if text:sub(pos, pos + 3) == 'null' then
+            pos = pos + 4;
+            return nil;
+        end
+        if c:find('[%d%-%+]') ~= nil then
+            return parse_number();
+        end
+        fail('unexpected character ' .. c);
+    end
+
+    local value = parse_value(0);
+    skip();
+    if pos <= last then
+        fail('trailing content');
+    end
+    return value;
+end
+
+package.loaded['json'] = json;
+"""
+
+
+class AshitaHost:
+    """Python-side handle on the in-memory Ashita host.
+
+    lua                -- the runtime the fakes were installed into
+    require(name)       -- require a module inside that runtime
+    events              -- event name -> registered handler
+    fire(event, **kw)   -- build the event table, call the handler, return it
+    chat                -- the captured console lines
+    settings            -- the live settings table the addon holds
+    saves               -- how many settings.save() calls happened
+    sessions            -- the session string recorded at each save
+    switch_profile(d)   -- fire the settings profile-switch callback
+    set_party_name(n)   -- what AshitaCore reports as party member 0
+    tick(seconds)       -- set the monotonic clock
+    wall(seconds)       -- set the wall clock, as an offset from EPOCH
+    strip_colors_calls  -- how many times string:strip_colors() ran
+    """
+
+    def __init__(self, lua, player="", profile=None):
+        self.lua = lua
+        lua.execute(ASHITA_CHUNK)
+        lua.execute(JSON_CHUNK)
+        g = lua.globals()
+        g["__host_epoch"] = EPOCH
+        g["__host_wall"] = EPOCH
+        g["__host_player"] = player or ""
+        if profile is not None:
+            g["__host_profile"] = lua.table_from(dict(profile))
+
+    def _g(self, name):
+        return self.lua.globals()[name]
+
+    def require(self, name):
+        return self.lua.globals()["require"](name)
+
+    @property
+    def events(self):
+        return {k: v for k, v in self._g("__host_events").items()}
+
+    @property
+    def aliases(self):
+        return {k: v for k, v in self._g("__host_aliases").items()}
+
+    def fire(self, event, **fields):
+        """Invoke a registered handler with an event table built from kwargs.
+
+        The table is returned, so a caller can read back what the handler
+        wrote to it -- e.blocked, for instance.
+        """
+        handler = self.events.get(event)
+        if handler is None:
+            raise KeyError("no handler registered for %r" % event)
+        e = self.lua.table_from(dict(fields))
+        handler(e)
+        return e
+
+    @property
+    def chat(self):
+        return _seq(self._g("__host_chat"))
+
+    @property
+    def settings(self):
+        return self._g("__host_settings")
+
+    @property
+    def saves(self):
+        return int(self._g("__host_saves"))
+
+    @property
+    def sessions(self):
+        return _seq(self._g("__host_sessions"))
+
+    @property
+    def strip_colors_calls(self):
+        return int(self._g("__host_strip_calls"))
+
+    @property
+    def profile_callback(self):
+        return self._g("__host_settings_cb")
+
+    @property
+    def json(self):
+        return self.lua.globals()["require"]("json")
+
+    def set_party_name(self, name):
+        self.lua.globals()["__host_player"] = name or ""
+
+    def tick(self, seconds):
+        """Set the monotonic clock -- the one every run timer reads."""
+        g = self.lua.globals()
+        g["__host_mono"] = seconds
+        if g["__clock"] is not None:
+            g["__clock"] = seconds
+
+    def wall(self, seconds):
+        """Set the wall clock, as an offset in seconds from EPOCH.
+
+        This is the clock `saved_at` and State:restore's staleness check use;
+        wall(4 * 60 * 60) ages a snapshot by four hours without touching any
+        run timer.
+        """
+        self.lua.globals()["__host_wall"] = EPOCH + seconds
+
+    def switch_profile(self, profile):
+        """A character change: a new settings table reaches the callback."""
+        return self.lua.globals()["__host_switch"](
+            self.lua.table_from(dict(profile)))
+
+
+def install_ashita(lua, player="", profile=None):
+    """Install the Ashita host fakes and the json stub, and return the handle.
+
+    Everything inctrack.lua reaches for at load is supplied: the `addon`
+    table, T{}, ashita.events, AshitaCore, common, chat, settings, a captured
+    print, the two string extensions, deterministic clocks, and json.
+    """
+    return AshitaHost(lua, player=player, profile=profile)
