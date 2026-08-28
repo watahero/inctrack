@@ -319,18 +319,18 @@ def extra_of(state):
 XFAIL_MARK = "XFAIL "
 FIXED_MARK = "NOW PASSING "
 
-# The confirmed defects still under test -- and nothing else. Two are left:
+# The confirmed defects still under test -- and nothing else. One is left:
 #
-#   * the run clock not aged by the time spent unloaded     (state suite)
 #   * the close button the window asks for and then ignores (ui suite)
 #
-# FIX-01, the bonus objective payout counted as a cleared phase, is fixed and
-# its line is an ordinary check now.
+# FIX-01 (a bonus objective payout counted as a cleared phase) and FIX-02 (the
+# run clock not aged by the time spent unloaded) are fixed, and their lines are
+# ordinary checks now.
 #
-# A third means something regressed; a missing one means a fix landed before
+# A second means something regressed; a missing one means a fix landed before
 # its red line could prove anything. main() fails the run either way. Phase 2
 # drives this number to zero, without editing any of the three assertions.
-EXPECTED_XFAILS = 2
+EXPECTED_XFAILS = 1
 
 # The identities behind that count. A count alone cannot tell three defects
 # from three *different* defects: one fix landing early plus one regression
@@ -338,7 +338,7 @@ EXPECTED_XFAILS = 2
 # of the mechanism -- that a green line here is as significant as a red one --
 # quietly lost. Each xfail names which defect it stands for and main() compares
 # the set, so a swap cannot pass.
-EXPECTED_DEFECTS = {"FIX-02", "FIX-03"}
+EXPECTED_DEFECTS = {"FIX-03"}
 
 
 class Result:
@@ -832,7 +832,7 @@ def test_state_units(lua, parser, State):
 
     # Two seconds of tolerance on the clock comparisons: the stamp is real
     # wall time and a second can tick between the save and the restore.
-    res.xfail(abs(back_left - (saved_left - GAP)) <= 2
+    res.check(abs(back_left - (saved_left - GAP)) <= 2
               and abs(back_elapsed - (saved_elapsed + GAP)) <= 2
               and back_bonus is None,
               "clock was optimistic by the reload gap after a reconnect -- "
@@ -840,8 +840,60 @@ def test_state_units(lua, parser, State):
               "left instead of %d, %d seconds elapsed instead of %d, and a "
               "bonus objective that had already run out"
               % (round(back_left), round(saved_left - GAP),
-                 round(back_elapsed), round(saved_elapsed + GAP)),
-              "FIX-02")
+                 round(back_elapsed), round(saved_elapsed + GAP)))
+
+    # A bonus with time to spare survives the same gap, with its countdown
+    # moved down by it -- neither reset to what it was nor dropped.
+    lua.globals()["__clock"] = 0
+    f4 = new_state(lua, State)
+    feed(f4, parser, [
+        "You have 90 minutes remaining inside this Incursion.",
+        "Incursion [Fort Ghelsba] Begins! (Normal)",
+        "Bonus Objective: Defeat 5 Sentry Lizard! (Expires in 20 Minutes)",
+    ])
+    blob4 = f4.serialise(f4)
+    blob4["saved_at"] = blob4["saved_at"] - GAP
+
+    f5 = new_state(lua, State)
+    res.check(bool(f5.restore(f5, blob4)),
+              "a run with a live bonus was thrown away as too old")
+    kept = f5.bonus(f5)
+    res.check(kept is not None,
+              "a bonus with ten minutes still to run was dropped on restore")
+    kept_left = float(f5.bonus_remaining(f5)) if kept is not None else -1.0
+    res.check(abs(kept_left - (20 * 60 - GAP)) <= 2,
+              "a surviving bonus countdown was not moved down by the reload "
+              "gap: %d seconds left, expected %d"
+              % (round(kept_left), 20 * 60 - GAP))
+    res.check(bool(f5.snapshot(f5)["desynced"]),
+              "ageing the clock cleared the out-of-sync marking -- correcting "
+              "the clock restores no knowledge of what the party did while "
+              "the addon was gone")
+
+    # A stamp from the future is clock skew or a hand-edited settings file,
+    # and it must never be able to add time to the run (T-02-01).
+    f6 = new_state(lua, State)
+    feed(f6, parser, [
+        "You have 90 minutes remaining inside this Incursion.",
+        "Incursion [Fort Ghelsba] Begins! (Normal)",
+    ])
+    lua.globals()["__clock"] = 120
+    fwd_left = float(f6.time_left(f6))
+    fwd_elapsed = float(f6.elapsed(f6))
+    blob6 = f6.serialise(f6)
+    blob6["saved_at"] = blob6["saved_at"] + GAP
+
+    f7 = new_state(lua, State)
+    res.check(bool(f7.restore(f7, blob6)),
+              "a run stamped in the future was thrown away")
+    fwd_back_left = float(f7.time_left(f7)) if f7.snapshot(f7) else -1.0
+    fwd_back_elapsed = float(f7.elapsed(f7)) if f7.snapshot(f7) else -1.0
+    res.check(abs(fwd_back_left - fwd_left) <= 2
+              and abs(fwd_back_elapsed - fwd_elapsed) <= 2,
+              "a save stamped ten minutes in the future moved the clock: %d "
+              "seconds left and %d elapsed, expected %d and %d"
+              % (round(fwd_back_left), round(fwd_back_elapsed),
+                 round(fwd_left), round(fwd_elapsed)))
 
     lua.globals()["__clock"] = 0
 
@@ -1302,9 +1354,13 @@ def test_json_roundtrip(lua, parser, State, libs):
     res.check(b["bonus"]["label"] == "Sentry Lizard"
               and int(b["bonus"]["cur"]) == 2 and int(b["bonus"]["max"]) == 5,
               "bonus lost")
-    res.check(int(s2.bonus_remaining(s2)) == int(s.bonus_remaining(s)),
+    # One second of tolerance on both: restore subtracts a real wall-clock gap
+    # now, and the os.time() second can tick over between the encode and the
+    # decode. A one-second move here is the ageing working, not a value lost.
+    res.check(abs(int(s2.bonus_remaining(s2)) - int(s.bonus_remaining(s))) <= 1,
               "bonus expiry lost")
-    res.check(int(s2.time_left(s2)) == int(s.time_left(s)), "time left lost")
+    res.check(abs(int(s2.time_left(s2)) - int(s.time_left(s))) <= 1,
+              "time left lost")
     res.check(extra_of(s2).get("Seals Broken") == (2, 6, False),
               "unknown counter lost: %r" % extra_of(s2))
     boons = list(b["boons"].values())

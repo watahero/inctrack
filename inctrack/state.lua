@@ -609,8 +609,23 @@ function State:restore(data)
         return false;
     end
 
-    -- Wall-clock age, not the injected clock: this survives an addon reload.
-    if data.saved_at and (os.time() - data.saved_at) > STALE_SECONDS then
+    -- How long we were gone. Wall clock is the only source that survives
+    -- process death: the injected monotonic clock restarts from zero with the
+    -- addon, so the stamp written at save time is the only record of the gap.
+    -- A negative gap is a stamp from the future -- clock skew, or a settings
+    -- file edited by hand -- and is clamped to zero, because time spent away
+    -- can only ever be taken off the run, never added to it. An absent stamp
+    -- reads as no gap, which is also what exempts such a blob from the
+    -- staleness rule below, exactly as before.
+    local gap = 0;
+    if data.saved_at then
+        gap = os.time() - data.saved_at;
+        if gap < 0 then
+            gap = 0;
+        end
+    end
+
+    if data.saved_at and gap > STALE_SECONDS then
         return false;
     end
 
@@ -629,7 +644,8 @@ function State:restore(data)
     run.awards_seen    = data.awards_seen or data.phases_cleared or 0;
     run.phases_cleared = data.phases_cleared or 0;
     run.points_partial = data.points_partial or false;
-    run.started        = now - (data.elapsed or 0);
+    -- The gap counts as run time: the instance kept going without us.
+    run.started        = now - (data.elapsed or 0) - gap;
     run.recovered      = true;
 
     -- We were not listening between the save and now, so treat everything
@@ -637,7 +653,10 @@ function State:restore(data)
     run.desynced       = true;
 
     if data.time_left then
-        run.time_left = data.time_left;
+        run.time_left = data.time_left - gap;
+        if run.time_left < 0 then
+            run.time_left = 0;
+        end
         run.time_sync = now;
     end
 
@@ -649,7 +668,11 @@ function State:restore(data)
             cur   = data.bonus.cur or 0,
             max   = data.bonus.max,
             done  = data.bonus.done or false,
-            expires_at = data.bonus.remaining and (now + data.bonus.remaining) or nil,
+            -- No special case for a bonus that ran out while we were gone: a
+            -- negative result puts the expiry in the past, and State:bonus()
+            -- already drops a not-done bonus past its expiry. That keeps the
+            -- record in place, so a later progress line can still revive it.
+            expires_at = data.bonus.remaining and (now + data.bonus.remaining - gap) or nil,
         };
     end
 
