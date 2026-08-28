@@ -33,11 +33,19 @@ Suites:
 ui.lua and inctrack.lua are reached through stubbed hosts (test/stubs.py);
 make_host() builds an isolated runtime with both installed.
 
-A few assertions are recorded as expected failures with Result.xfail. An
-expected failure asserts the behaviour the addon is *supposed* to have; a
-known defect is why it is false today. They are counted like any other check,
-they print on their own XFAIL lines, and they never make the run exit
-non-zero. Phase 2 is where they go green.
+Three assertions are recorded as expected failures with Result.xfail, one per
+confirmed defect this milestone exists to fix. An expected failure asserts the
+behaviour the addon is *supposed* to have; the defect is why it is false
+today. They are counted like any other check, they print on their own marked
+lines, and they never make the run exit non-zero:
+
+  * a bonus objective payout counted as a cleared phase   (suite 4)
+  * the run clock not aged by the time spent unloaded     (suite 4)
+  * the close button the window asks for and then ignores (suite 9)
+
+main() guards the total against EXPECTED_XFAILS, so a fourth failure -- or a
+fix that landed before its red line could prove anything -- fails the run.
+Phase 2 turns all three green without editing their assertions.
 """
 
 import os
@@ -281,6 +289,18 @@ def extra_of(state):
 # nothing else the harness prints may contain either substring.
 XFAIL_MARK = "XFAIL "
 FIXED_MARK = "NOW PASSING "
+
+# The confirmed defects this phase brings under test -- and nothing else.
+# Three, exactly:
+#
+#   * a bonus objective payout counted as a cleared phase   (state suite)
+#   * the run clock not aged by the time spent unloaded     (state suite)
+#   * the close button the window asks for and then ignores (ui suite)
+#
+# A fourth means something regressed; a missing one means a fix landed before
+# its red line could prove anything. main() fails the run either way. Phase 2
+# drives this number to zero, without editing any of the three assertions.
+EXPECTED_XFAILS = 3
 
 
 class Result:
@@ -593,6 +613,108 @@ def test_state_units(lua, parser, State):
     feed(s9, parser, ["Incursion [Giddeus] Begins! (Normal)"])
     res.check(len(list(s9.snapshot(s9)["boons"].values())) == 0,
               "boons carried into a new run")
+
+    # --- FIX-01, as an expected failure -----------------------------------
+
+    # Intended behaviour, not current behaviour: only a phase boss dying
+    # advances the count of cleared phases. Measured as deltas rather than as
+    # one absolute number, so any single-author scheme Phase 2 chooses
+    # satisfies it without this assertion being edited.
+    f1 = new_state(lua, State)
+    feed(f1, parser, [
+        "Incursion [Fort Ghelsba] Begins! (Normal)",
+        "New Objective: Defeat 20 enemies (Orcish Grappler, Orcish Fodder)",
+        # Phase #1 deliberately: reaching phase N means N-1 were cleared, so a
+        # Phase #2 fixture here would legitimately read 1 and turn the opening
+        # check red against a correct implementation.
+        "Incursion [Fort Ghelsba] Phase #1 7/20",
+    ])
+    at_start = int(f1.snapshot(f1)["phases_cleared"])
+    res.check(at_start == 0,
+              "the first phase of a run was reported as one already cleared: "
+              "%d" % at_start)
+
+    feed(f1, parser, [
+        "Godwen gains 84 incursion points.",
+        "Incursion [Fort Ghelsba] Phase #2 0/20",
+    ])
+    after_boss = int(f1.snapshot(f1)["phases_cleared"])
+    res.check(after_boss - at_start == 1,
+              "killing the phase boss did not move the count of cleared "
+              "phases by exactly one (%d -> %d)" % (at_start, after_boss))
+
+    # A bonus objective pays out too, and no phase message follows it.
+    feed(f1, parser, [
+        "Bonus Objective: Defeat 5 Sentry Lizard! (Expires in 10 Minutes)",
+        "Incursion [Fort Ghelsba] Bonus Objective Complete!",
+        "Godwen gains 30 incursion points.",
+    ])
+    after_bonus = int(f1.snapshot(f1)["phases_cleared"])
+
+    res.xfail(after_bonus - after_boss == 0,
+              "counted a bonus objective payout as a cleared phase -- the "
+              "window went from %d cleared to %d without a phase boss dying"
+              % (after_boss, after_bonus))
+
+    # Both awards must still add up, so a fix that simply drops the second one
+    # is caught rather than mistaken for the real thing.
+    res.check(int(f1.snapshot(f1)["points"]) == 84 + 30,
+              "a points award went missing: %d instead of %d"
+              % (int(f1.snapshot(f1)["points"]), 84 + 30))
+
+    # --- FIX-02, as an expected failure -----------------------------------
+
+    # Intended behaviour: time that passed while the addon was unloaded is
+    # time the run does not get back. The wall-clock stamp needed to work that
+    # out is already written into every save; the restore path never applies
+    # it, so a reconnect resumes with a clock that is exactly the reload gap
+    # too generous and a bonus objective that has really already lapsed.
+    #
+    # The injected clock is shared across suites, so it is set explicitly here
+    # and returned to zero at the end, the way the timer suites already do.
+    lua.globals()["__clock"] = 0
+    f2 = new_state(lua, State)
+    feed(f2, parser, [
+        "You have 90 minutes remaining inside this Incursion.",
+        "Incursion [Fort Ghelsba] Begins! (Normal)",
+        "New Objective: Defeat 20 enemies (Orcish Grappler, Orcish Fodder)",
+        "Incursion [Fort Ghelsba] Phase #1 5/20",
+    ])
+    lua.globals()["__clock"] = 120
+    feed(f2, parser, [
+        "Bonus Objective: Defeat 5 Sentry Lizard! (Expires in 5 Minutes)",
+    ])
+
+    saved_left = float(f2.time_left(f2))
+    saved_elapsed = float(f2.elapsed(f2))
+    blob = f2.serialise(f2)
+
+    # Ten minutes offline, expressed the only way the addon can ever notice
+    # it: by moving the wall-clock stamp the save already carries.
+    GAP = 600
+    blob["saved_at"] = blob["saved_at"] - GAP
+
+    f3 = new_state(lua, State)
+    res.check(bool(f3.restore(f3, blob)),
+              "a run saved ten minutes ago was thrown away as too old")
+
+    back_left = float(f3.time_left(f3))
+    back_elapsed = float(f3.elapsed(f3))
+    back_bonus = f3.bonus(f3)
+
+    # Two seconds of tolerance on the clock comparisons: the stamp is real
+    # wall time and a second can tick between the save and the restore.
+    res.xfail(abs(back_left - (saved_left - GAP)) <= 2
+              and abs(back_elapsed - (saved_elapsed + GAP)) <= 2
+              and back_bonus is None,
+              "clock was optimistic by the reload gap after a reconnect -- "
+              "ten minutes away and the window came back claiming %d seconds "
+              "left instead of %d, %d seconds elapsed instead of %d, and a "
+              "bonus objective that had already run out"
+              % (round(back_left), round(saved_left - GAP),
+                 round(back_elapsed), round(saved_elapsed + GAP)))
+
+    lua.globals()["__clock"] = 0
 
     return res
 
@@ -2149,6 +2271,19 @@ def main():
     ok = True
     for s in suites:
         ok &= s.report()
+
+    # Success criterion 4 of this phase: not "some things fail" but "these
+    # three, and nothing else, fail". The count is summed across every suite,
+    # and all three live in suites that always run, so this holds identically
+    # with and without chatlogs. Neither line printed here may contain either
+    # report marker -- the phase criteria count those in this output.
+    known = sum(len(s.xfails) for s in suites)
+    print()
+    print("  %d known defects (expected until Phase 2)" % known)
+    if known != EXPECTED_XFAILS:
+        print("  guard: this phase closes on exactly %d known defects; the "
+              "run reported %d" % (EXPECTED_XFAILS, known))
+        ok = False
 
     print()
     print("PASS" if ok else "FAIL")
