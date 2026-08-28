@@ -1618,6 +1618,40 @@ def test_ui():
         res.check(kept is visible,
                   "the window changed its own visibility with no run to show")
 
+    # --- FIX-03, as an expected failure -----------------------------------
+
+    # Intended behaviour, not current behaviour: if the window offers a close
+    # control, clicking it closes the window. Stated as a disjunction over
+    # what the recorded Begin call shows, so either legitimate fix turns it
+    # green without this assertion being edited -- one where the window stops
+    # asking for a close control at all, and one where it starts drawing the
+    # bar that would carry it.
+    close_host = make_host()
+    close_parser = close_host.require("parser")
+    CloseState = close_host.require("state")
+    close_ui = close_host.require("ui")
+
+    close_host.tick(0)
+    closable = new_state(close_host.lua, CloseState)
+    feed(closable, close_parser, [
+        "Incursion [%s] Begins! (Normal)" % INSTANCE,
+        "Incursion [%s] Phase #1 4/15" % INSTANCE,
+    ])
+
+    close_host.imgui.reset()
+    close_host.imgui.arm_close()      # the player clicks close, this frame
+    still_shown = close_ui.render(
+        closable,
+        close_host.lua.table_from({"visible": True, "locked": False}))
+
+    begins = [args for name, args in close_host.imgui.calls if name == "Begin"]
+    offered_close = any(len(args) > 1 and lupa.lua_type(args[1]) == "table"
+                        for args in begins)
+
+    res.xfail((not offered_close) or still_shown is False,
+              "the window asks for a close button and then ignores it -- "
+              "clicking close leaves the window on screen")
+
     # No clock to reset at the end of this suite: every case above builds and
     # discards its own host, so nothing it advanced is shared with any other
     # suite -- which is why the eight existing report lines are unaffected.
