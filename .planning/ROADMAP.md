@@ -47,7 +47,7 @@ Every phase must leave these true, and each phase's verification restates them:
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: The Net** - Bring `ui.lua` and `inctrack.lua` under test behind stubs, and turn each confirmed defect into a named failing test
+- [x] **Phase 1: The Net** - Bring `ui.lua` and `inctrack.lua` under test behind stubs, and turn each confirmed defect into a named failing test
 - [ ] **Phase 2: The Three Defects** - Kill the double-counted phase, the un-aged restore and the dead close path, flipping Phase 1's red tests green
 - [ ] **Phase 3: Fragile Paths** - Make the render path un-crashable and stop the parser and restore path from admitting things the server never said
 - [ ] **Phase 4: Cost and Record** - Reject an irrelevant chat line before paying for it, get settings writes off the chat thread, and make the docs describe the addon that ships
@@ -173,7 +173,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. The Net | 3/3 | In Progress|  |
+| 1. The Net | 3/3 | ✓ Complete | 2026-08-29 |
 | 2. The Three Defects | 0/TBD | Not started | - |
 | 3. Fragile Paths | 0/TBD | Not started | - |
 | 4. Cost and Record | 0/TBD | Not started | - |
