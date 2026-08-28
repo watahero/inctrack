@@ -21,9 +21,14 @@ a folder copy.
 Every phase must leave these true, and each phase's verification restates them:
 
 - The full suite is green against the author's chatlogs at
-  `C:\Games\CatsEyeXI\catseyexi-client\Ashita\chatlogs` — baseline 2026-08-28 is
-  **12,841 checks, 8 suites, 2,943,169 chat lines from 126 logs**. Check counts
-  may only go up.
+  `C:\Games\CatsEyeXI\catseyexi-client\Ashita\chatlogs`. The rule is **no
+  pre-existing suite's check count may fall** — not a fixed total. The total
+  drifts on its own because the author keeps playing and `test_replay` only
+  counts runs it watches end to end: the 2026-08-28 baseline of 12,841 over 126
+  logs re-measured at **12,821 over 127 logs** on 2026-08-29 from the *unmodified*
+  pre-phase harness. After Phase 1 the same 127 logs yield **12,973**. Per-suite
+  floor as of Phase 1: parser 11819, generic 1, replay 888, state 38,
+  adaptability 20, disconnect 23, timers 21, persistence 25, ui 55, addon 83.
 
 - Suite 2 still holds: **no generic-tier pattern matches anything in today's
   logs.** A generic hit means a specific pattern regressed.
