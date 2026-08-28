@@ -105,6 +105,7 @@ Populated during roadmap creation (2026-08-29). See `.planning/ROADMAP.md` for p
 | DOC-02 | Phase 4 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 19 total
 - Mapped to phases: 19 ✓
 - Unmapped: 0 ✓

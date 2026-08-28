@@ -47,7 +47,9 @@ patterns-established:
   - "Snapshot testing via a normalised, indented, diffable call log with colour names resolved — no golden files on disk"
   - "Expected-failure markers are a cross-plan data contract, grepped from stdout rather than parsed from a report object"
 
-requirements-completed: [COVR-01, COVR-02, COVR-03]
+requirements-completed: []  # COVR-01/02/03 are shared with plans 01-02 and 01-03,
+# which write the assertions. This plan delivered the mechanism only, so marking
+# them complete here would be false. See '## Requirement status' below.
 
 coverage:
   - id: D1
@@ -334,6 +336,24 @@ persistence: json round trip                     20 checks  ok
 The cause is input drift: `Godwen_2026.08.29.log` appeared after the baseline was taken, and `Godwen_2026.08.28.log` kept being written to after it. `test_replay` only counts a run it watched from `Begins!` through `Complete!`, so a run straddling the point at which the baseline was measured can move the total in either direction. The check count is a property of the author's private, still-growing chatlog corpus, not only of the harness.
 
 **What plans 01-02 and 01-03 should do:** treat **12,821 measured on 2026-08-29 against 127 logs** as the floor, and — more usefully — hold the *per-suite* line above constant rather than the sum. The sum will keep drifting every time the author plays. No suite reports `FAILED`, the run exits 0, and both parser suites are green.
+
+## Requirement status
+
+The plan's frontmatter lists `requirements: [COVR-01, COVR-02, COVR-03]`, but
+all three are **shared** with plans 01-02 and 01-03, and this plan writes no
+test assertions about addon behaviour at all — it delivers the mechanism the
+other two use.
+
+- **COVR-01** (`ui.lua` asserted under a stubbed ImGui) — the stub exists and
+  `ui.render` runs against it; the assertions are 01-02's.
+- **COVR-02** (`inctrack.lua` under a stubbed Ashita host) — the host exists
+  and all five handlers are invocable; the assertions are 01-03's.
+- **COVR-03** (a regression test per confirmed defect) — `Result.xfail` and
+  the markers exist; **none of the three defect tests are written yet**
+  (FIX-03 is 01-02's, FIX-01 and FIX-02 are 01-03's).
+
+They were briefly marked Complete in REQUIREMENTS.md by the state-update step
+and reverted to Pending in the same session. 01-02 and 01-03 mark them.
 
 ## User Setup Required
 
