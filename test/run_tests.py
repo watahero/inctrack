@@ -1930,6 +1930,189 @@ def test_addon_shell():
     res.check(inc["settings"]["locked"] is True,
               "a settings event with nothing in it changed the settings")
 
+    # --- the command surface ----------------------------------------------
+
+    # Commands arrive as a plain string; the harness's string:args() extension
+    # makes args[1] and args[2] behave as they do in game. `blocked` is read
+    # back off the event table the handler was given.
+    cmd = loaded_host()
+    inc = cmd.addon["incursion"]
+
+    e = cmd.fire("command", command="/incursion")
+    res.check(e["blocked"] is True,
+              "the addon let its own command fall through to the game as an "
+              "unknown command")
+    res.check(inc["override"] is True,
+              "asking for the window with nothing on screen did not ask for "
+              "it to be shown")
+    res.check(any("No active Incursion run" in line for line in cmd.chat),
+              "the window was asked for with no run in progress and the "
+              "player was told nothing: %r" % cmd.chat)
+
+    cmd.fire("command", command="/incursion")
+    res.check(inc["override"] is False,
+              "the command does not toggle: asking twice did not put the "
+              "window back where it started")
+
+    e = cmd.fire("command", command="/inc")
+    res.check(e["blocked"] is True,
+              "the short form of the command was not recognised")
+    res.check(inc["override"] is True,
+              "the short form of the command did not toggle the window")
+
+    chat_before = len(cmd.chat)
+    e = cmd.fire("command", command="/heal")
+    res.check(e["blocked"] is None,
+              "the addon swallowed a command that was not its own")
+    res.check(len(cmd.chat) == chat_before,
+              "the addon answered a command that was not its own: %r"
+              % cmd.chat[chat_before:])
+
+    # --- reset ---------------------------------------------------------------
+
+    clearing = loaded_host()
+    clearing.fire("text_in", message=begins())
+    clearing.addon["incursion"]["override"] = True
+    saves_before = clearing.saves
+    clearing.fire("command", command="/incursion reset")
+
+    inc = clearing.addon["incursion"]
+    res.check(shell_run(clearing) is None,
+              "clearing the run left it on screen")
+    res.check(clearing.settings["session"] == "",
+              "the cleared run was still on disk and would come back on the "
+              "next reload: %r" % (clearing.settings["session"],))
+    res.check(clearing.saves == saves_before + 1,
+              "clearing the run was never written to disk")
+    res.check(any("Run cleared" in line for line in clearing.chat),
+              "the run was cleared and the player was never told: %r"
+              % clearing.chat)
+    res.check(inc["override"] is None,
+              "clearing the run left a manual show/hide from the old run in "
+              "place")
+
+    # --- lock and auto, both ways -------------------------------------------
+
+    toggles = loaded_host()
+    saves_before = toggles.saves
+
+    toggles.fire("command", command="/incursion lock")
+    res.check(toggles.settings["locked"] is True,
+              "locking the window did not lock it")
+    res.check(toggles.chat[-1].endswith("Window locked."),
+              "locking the window reported the wrong state: %r"
+              % toggles.chat[-1])
+    toggles.fire("command", command="/incursion lock")
+    res.check(toggles.settings["locked"] is False,
+              "locking the window a second time did not unlock it")
+    res.check(toggles.chat[-1].endswith("Window unlocked."),
+              "unlocking the window reported the wrong state: %r"
+              % toggles.chat[-1])
+    res.check(toggles.saves == saves_before + 2,
+              "the lock setting was changed without being written to disk")
+
+    toggles.addon["incursion"]["override"] = True
+    saves_before = toggles.saves
+    toggles.fire("command", command="/incursion auto")
+    res.check(toggles.settings["auto"] is False,
+              "turning automatic show/hide off did not turn it off")
+    res.check(toggles.addon["incursion"]["override"] is None,
+              "turning automatic show/hide off left an old manual show/hide "
+              "in charge of the window")
+    res.check(toggles.chat[-1].endswith("Automatic show/hide off."),
+              "turning automatic show/hide off reported the wrong state: %r"
+              % toggles.chat[-1])
+    toggles.fire("command", command="/incursion auto")
+    res.check(toggles.settings["auto"] is True,
+              "turning automatic show/hide on did not turn it back on")
+    res.check(toggles.chat[-1].endswith("Automatic show/hide on."),
+              "turning automatic show/hide on reported the wrong state: %r"
+              % toggles.chat[-1])
+    res.check(toggles.saves == saves_before + 2,
+              "the automatic show/hide setting was changed without being "
+              "written to disk")
+
+    # --- an unrecognised subcommand explains itself and does nothing else ---
+
+    usage = loaded_host()
+    usage.fire("text_in", message=begins())
+    saves_before = usage.saves
+    auto_before = usage.settings["auto"]
+    locked_before = usage.settings["locked"]
+    chat_before = len(usage.chat)
+
+    usage.fire("command", command="/incursion wibble")
+    said = usage.chat[chat_before:]
+    res.check(len(said) == 5,
+              "an unrecognised subcommand printed %d lines instead of the "
+              "usage header and its four commands: %r" % (len(said), said))
+    res.check(bool(said) and said[0].endswith("Usage:"),
+              "an unrecognised subcommand did not lead with usage: %r" % said)
+    res.check(all("/incursion" in line for line in said[1:]),
+              "the usage text does not list the commands: %r" % said[1:])
+    res.check(usage.saves == saves_before,
+              "an unrecognised subcommand wrote settings to disk")
+    res.check(usage.settings["auto"] == auto_before
+              and usage.settings["locked"] == locked_before,
+              "an unrecognised subcommand changed a setting")
+    res.check(shell_run(usage) is not None,
+              "an unrecognised subcommand threw the run away")
+
+    # --- visible(): the override-vs-auto interaction ------------------------
+
+    # Three lines of code with five distinct outcomes, and the one place a
+    # player can end up staring at a window that will not go away or waiting
+    # for one that never arrives.
+    look = loaded_host()
+    visible = look.addon["visible"]
+
+    res.check(visible() is False,
+              "the window was on screen with no Incursion in progress")
+
+    look.fire("text_in", message=begins())
+    res.check(visible() is True,
+              "the window stayed hidden through a run the player is standing "
+              "in, with automatic show/hide on")
+
+    look.settings["auto"] = False
+    res.check(visible() is False,
+              "the window showed itself although automatic show/hide is off")
+
+    look.addon["incursion"]["override"] = True
+    res.check(visible() is True,
+              "the window was asked for by hand and still refused to appear")
+
+    look.addon["incursion"]["override"] = False
+    look.settings["auto"] = True
+    res.check(visible() is False,
+              "the window was dismissed by hand and came back anyway")
+
+    # --- the render gate ----------------------------------------------------
+
+    frame = loaded_host()
+    frame.imgui.reset()
+    frame.fire("d3d_present")
+    res.check(not frame.imgui.calls,
+              "a frame drew something with no Incursion in progress: %r"
+              % (frame.imgui.calls[:4],))
+
+    frame.fire("text_in", message=begins())
+    frame.fire("text_in", message=phase_line(1, 3))
+    override_before = frame.addon["incursion"]["override"]
+    frame.imgui.reset()
+    frame.fire("d3d_present")
+    drawn = [name for name, _ in frame.imgui.calls]
+    res.check("Begin" in drawn,
+              "a frame during a live run drew no window: %r" % drawn)
+    res.check(frame.addon["incursion"]["override"] is override_before,
+              "an ordinary frame changed the window's show/hide state by "
+              "itself")
+
+    # Nothing here arms the recorder's close switch or asserts anything about
+    # the manual-hide branch at inctrack.lua:219-222: that is the ui suite's
+    # one expected failure, and a second entry for the same defect would break
+    # the exactly-three guard in main().
+
     return res
 
 
