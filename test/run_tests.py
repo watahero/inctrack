@@ -1305,14 +1305,21 @@ def expected_window(text):
 
 
 def first_diff(got, want):
-    """Where two windows first disagree, as one readable line."""
+    """Where two windows first disagree, as one readable line.
+
+    Compared unstripped: the indentation in a snapshot is the Begin/End
+    nesting depth, so a change that alters only the depth -- an extra Begin, a
+    missing End, a section drawn one level in -- is a real difference and not
+    whitespace. Stripping first reported 'identical' for exactly the failure
+    the snapshots most want to catch.
+    """
     g, w = got.splitlines(), want.splitlines()
     for i in range(max(len(g), len(w))):
-        a = g[i].strip() if i < len(g) else "<end of window>"
-        b = w[i].strip() if i < len(w) else "<end of window>"
+        a = g[i] if i < len(g) else "<end of window>"
+        b = w[i] if i < len(w) else "<end of window>"
         if a != b:
             return "line %d drew %r, expected %r" % (i + 1, a, b)
-    return "identical"
+    return "identical apart from trailing whitespace"
 
 
 # The six expected windows. Inline rather than golden files on disk, so a
