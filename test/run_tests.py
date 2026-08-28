@@ -1093,6 +1093,258 @@ def rgba(color):
     return tuple(round(float(color[i]), 4) for i in range(1, 5))
 
 
+def render_case(lines, clock=0, opts=None):
+    """One whole-window render of a hand-built run, as reviewable text.
+
+    lines -- the chat the run is built from, exactly as the game would send it
+    clock -- the monotonic clock at render time, so elapsed and the instance
+             countdown are the same on every run of the suite
+    opts  -- ui.render's options table; visible and unlocked by default
+
+    A fresh host per case is deliberate: ui.lua keeps origin_x and short_cache
+    at file scope, so a shared host would let one case's memo cache colour the
+    next one's output.
+
+    Returns (snapshot text, what render returned, the ImGui stack balance).
+    """
+    host = make_host()
+    parser = host.require("parser")
+    State = host.require("state")
+    ui = host.require("ui")
+    COLOR = lua_locals(host, ui.render)["COLOR"]
+
+    host.tick(0)
+    state = new_state(host.lua, State)
+    feed(state, parser, lines)
+    host.tick(clock)
+
+    settings = host.lua.table_from(
+        {"visible": True, "locked": False} if opts is None else dict(opts))
+    host.imgui.reset()
+    shown = ui.render(state, settings)
+    return (host.imgui.snapshot(colors=COLOR, measurements=False),
+            shown, host.imgui.balance())
+
+
+def expected_window(text):
+    """An inline expected window, written at column 0 for reviewability.
+
+    Only the leading and trailing newlines of the literal are dropped -- the
+    two-space indent between Begin and End is part of the snapshot.
+    """
+    return text.strip("\n")
+
+
+def first_diff(got, want):
+    """Where two windows first disagree, as one readable line."""
+    g, w = got.splitlines(), want.splitlines()
+    for i in range(max(len(g), len(w))):
+        a = g[i].strip() if i < len(g) else "<end of window>"
+        b = w[i].strip() if i < len(w) else "<end of window>"
+        if a != b:
+            return "line %d drew %r, expected %r" % (i + 1, a, b)
+    return "identical"
+
+
+# The six expected windows. Inline rather than golden files on disk, so a
+# change to any draw function shows up as a readable diff in review. Every
+# line of all six was read against the layout mockup in ui.lua's header
+# comment (ui.lua:15-26) before being pasted in.
+
+# 1. Mid-phase. The phase bar with its overlay label, the mob line, and the
+#    'Next:' line with a right-aligned location.
+WINDOW_MID_PHASE = expected_window("""
+PushStyleVar 13 [4, 2]
+Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+  Dummy [300, 1]
+  TextColored instance 'Crawlers' Nest Depths'
+  SameLine
+  TextColored dim '. Normal'
+  SameLine
+  SetCursorPosX 252.00
+  TextColored text '~1:26:00'
+  PushStyleColor 40 bar_kills
+  ProgressBar 0.80 [-1, 16] 'Phase #3  12/15'
+  PopStyleColor 1
+  PushTextWrapPos 308.00
+  TextColored dim 'Nest Weevil, Nest Hornet, Nest Beetle'
+  PopTextWrapPos
+  TextColored dim 'Next: '
+  SameLine
+  TextColored text 'Nest Matriarch'
+  SameLine
+  SetCursorPosX 266.00
+  TextColored dim '(H-11)'
+  TextColored dim 'Phases cleared '
+  SameLine
+  TextColored text '2'
+  SameLine
+  SetCursorPosX 224.00
+  TextColored dim 'Elapsed 4:00'
+End
+PopStyleVar 1
+""")
+
+# 2. Boss up. One full-width orange bar carries the whole message, and the
+#    kill line and its mob list are gone.
+WINDOW_BOSS_UP = expected_window("""
+PushStyleVar 13 [4, 2]
+Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+  Dummy [300, 1]
+  TextColored instance 'Crawlers' Nest Depths'
+  SameLine
+  TextColored dim '. Normal'
+  SameLine
+  SetCursorPosX 252.00
+  TextColored text '~1:20:00'
+  PushStyleColor 40 bar_boss
+  ProgressBar 1.00 [-1, 16] 'BOSS  Nest Matriarch  (H-11)'
+  PopStyleColor 1
+  TextColored dim 'Phases cleared '
+  SameLine
+  TextColored text '2'
+  SameLine
+  SetCursorPosX 217.00
+  TextColored dim 'Elapsed 10:00'
+End
+PopStyleVar 1
+""")
+
+# 3. An active bonus and a counter the parser does not specifically know.
+#    The BONUS row with its right-aligned countdown and thin progress strip,
+#    the generic counter row, and the boon rows with shortened stats. No
+#    objective has been announced, so the objective section says so.
+WINDOW_BONUS = expected_window("""
+PushStyleVar 13 [4, 2]
+Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+  Dummy [300, 1]
+  TextColored instance 'Crawlers' Nest Depths'
+  SameLine
+  TextColored dim '. Normal'
+  SameLine
+  SetCursorPosX 273.00
+  TextColored dim '--:--'
+  TextColored dim 'Waiting for next objective...'
+  TextColored bonus 'BONUS '
+  SameLine
+  TextColored text 'Gilded Crawler  2/5'
+  SameLine
+  SetCursorPosX 280.00
+  TextColored text '6:00'
+  PushStyleColor 40 bar_bonus
+  ProgressBar 0.40 [-1, 5] ''
+  PopStyleColor 1
+  TextColored dim 'Hives Smoked'
+  SameLine
+  SetCursorPosX 287.00
+  TextColored text '1/3'
+  PushStyleColor 40 bar_extra
+  ProgressBar 0.33 [-1, 5] ''
+  PopStyleColor 1
+  TextColored dim 'Phases cleared '
+  SameLine
+  TextColored text '0'
+  SameLine
+  SetCursorPosX 224.00
+  TextColored dim 'Elapsed 4:00'
+  TextColored boon 'Warden's Vigil'
+  SameLine
+  SetCursorPosX 203.00
+  TextColored dim 'WS Acc+15 STP+8'
+  TextColored boon 'Hivewarden's Guard'
+  SameLine
+  SetCursorPosX 217.00
+  TextColored dim 'VIT+10 DT-15%'
+End
+PopStyleVar 1
+""")
+
+# 4. Reconnected, on a phase we did not watch begin. The warning line, the
+#    '?' suffix on the phase label, the stale bar colour, the '(?)' on a mob
+#    list the server never confirmed for this phase, and no boss preview --
+#    the old phase's boss would be a lie.
+WINDOW_RECONNECTED = expected_window("""
+PushStyleVar 13 [4, 2]
+Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+  Dummy [300, 1]
+  TextColored instance 'Crawlers' Nest Depths'
+  SameLine
+  TextColored dim '. Normal'
+  SameLine
+  SetCursorPosX 266.00
+  TextColored text '~36:00'
+  TextColored warn 'reconnected - awaiting update'
+  PushStyleColor 40 bar_stale
+  ProgressBar 0.07 [-1, 16] 'Phase #5  1/15 ?'
+  PopStyleColor 1
+  PushTextWrapPos 308.00
+  TextColored warn 'Nest Weevil, Nest Hornet, Nest Beetle  (?)'
+  PopTextWrapPos
+  TextColored dim 'Phases cleared '
+  SameLine
+  TextColored text '4'
+  SameLine
+  SetCursorPosX 224.00
+  TextColored dim 'Elapsed 5:00'
+End
+PopStyleVar 1
+""")
+
+# 5. Finished, still inside the linger window. 'Complete' and the server's own
+#    run time replace the instance clock, and the objective, bonus and extras
+#    sections are gone. There is no SetCursorPosX before the value because the
+#    instance and difficulty already run past where it would start -- the
+#    do-not-overprint branch at ui.lua:96-100.
+WINDOW_FINISHED = expected_window("""
+PushStyleVar 13 [4, 2]
+Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+  Dummy [300, 1]
+  TextColored instance 'Crawlers' Nest Depths'
+  SameLine
+  TextColored dim '. Normal'
+  SameLine
+  TextColored good 'Complete 48m 44s'
+  TextColored dim 'Phases cleared '
+  SameLine
+  TextColored text '0'
+  SameLine
+  SetCursorPosX 217.00
+  TextColored dim 'Elapsed 48:44'
+End
+PopStyleVar 1
+""")
+
+# 6. A percent sign in server-supplied text, in an instance name and in a boon
+#    stat string. This asserts the harness records displayed text verbatim and
+#    never treats it as a format string (T-01-03). It is a statement about the
+#    recorder, not a claim that the real ImGui binding is safe -- that is
+#    HARD-01 in Phase 3 and is deliberately not attempted here.
+WINDOW_PERCENT = expected_window("""
+PushStyleVar 13 [4, 2]
+Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+  Dummy [300, 1]
+  TextColored instance 'Vault 50% Sealed'
+  SameLine
+  TextColored dim '. Normal'
+  SameLine
+  SetCursorPosX 273.00
+  TextColored dim '--:--'
+  TextColored dim 'Waiting for next objective...'
+  TextColored dim 'Phases cleared '
+  SameLine
+  TextColored text '0'
+  SameLine
+  SetCursorPosX 224.00
+  TextColored dim 'Elapsed 1:00'
+  TextColored boon 'Sealbreaker's Gift'
+  SameLine
+  SetCursorPosX 203.00
+  TextColored dim 'DT-15% Cure+10%'
+End
+PopStyleVar 1
+""")
+
+
 def test_ui():
     """ui.lua, against the recording ImGui stub.
 
@@ -1276,6 +1528,99 @@ def test_ui():
               "listed before %r, which contains it, so the longer phrase can "
               "never match whole"
               % (offenders[0] if offenders else ("", "")))
+
+    # --- whole-window snapshots -------------------------------------------
+
+    # Invented content in the server's established wording, so nothing here
+    # depends on a chatlog (D-12).
+    INSTANCE = "Crawlers' Nest Depths"
+    mid_phase = [
+        "You have 90 minutes remaining inside this Incursion.",
+        "Incursion [%s] Begins! (Normal)" % INSTANCE,
+        "Godwen gains 84 incursion points.",
+        "Godwen gains 149 incursion points.",
+        "New Objective: Defeat 15 enemies "
+        "(Nest Weevil, Nest Hornet, Nest Beetle)",
+        "(Boss: Nest Matriarch at (H-11))",
+        "Incursion [%s] Phase #3 12/15" % INSTANCE,
+    ]
+
+    cases = [
+        ("mid-phase", mid_phase, 240, WINDOW_MID_PHASE),
+
+        ("boss-up",
+         mid_phase + ["New Objective: Defeat Nest Matriarch at (H-11)!"],
+         600, WINDOW_BOSS_UP),
+
+        ("active-bonus", [
+            "Incursion [%s] Begins! (Normal)" % INSTANCE,
+            "Bonus Objective: Defeat 5 Gilded Crawler! (Expires in 10 Minutes)",
+            "Incursion [%s] Bonus Objective: Gilded Crawler 2/5" % INSTANCE,
+            "Incursion [%s] Hives Smoked 1/3" % INSTANCE,
+            "Godwen gains the effect of Warden's Vigil (X): "
+            "WS Accuracy+15 / Store TP+8",
+            "Godwen gains the effect of Hivewarden's Guard (X): "
+            "VIT+10 / Damage taken-15%",
+        ], 240, WINDOW_BONUS),
+
+        # Two drops, because one is not enough to show all four staleness
+        # markers at once: a phase message flags the old mob list but also
+        # clears the desync, since a kill count is live information
+        # (state.lua:206-224). The second reconnect is what puts the window
+        # into 'these mobs are only probable *and* this count is a lower
+        # bound' -- exactly the state the player must not mistake for truth.
+        ("reconnected", mid_phase + [
+            "Incursion [%s] Recovering session..." % INSTANCE,
+            "You have 41 minutes remaining inside this Incursion.",
+            "Incursion [%s] Phase #5 1/15" % INSTANCE,
+            "Incursion [%s] Recovering session..." % INSTANCE,
+        ], 300, WINDOW_RECONNECTED),
+
+        ("finished", [
+            "Incursion [%s] Begins! (Normal)" % INSTANCE,
+            "Incursion [%s] Complete! (Normal) Time: 48m 44s" % INSTANCE,
+        ], 10, WINDOW_FINISHED),
+
+        ("percent-in-server-text", [
+            "Incursion [Vault 50% Sealed] Begins! (Normal)",
+            "Godwen gains the effect of Sealbreaker's Gift (X): "
+            "Damage taken-15% / Cure Potency+10%",
+        ], 60, WINDOW_PERCENT),
+    ]
+
+    for name, lines, clock, want in cases:
+        got, shown, bal = render_case(lines, clock=clock)
+        res.check(got == want,
+                  "the %s window is not the one the layout contract "
+                  "describes: %s" % (name, first_diff(got, want)))
+        # Holds whatever the window contains, and Phase 3 leans on it: an
+        # unbalanced stack corrupts every frame drawn after this one.
+        res.check(bal["window"] == 0 and bal["style_var"] == 0,
+                  "the %s window left the ImGui stacks unbalanced: %r"
+                  % (name, bal))
+        res.check(shown is True,
+                  "the %s window hid itself although nobody asked it to"
+                  % name)
+
+    # Nothing to draw yet: not an empty window, no window at all.
+    blank_host = make_host()
+    BlankState = blank_host.require("state")
+    blank_ui = blank_host.require("ui")
+    blank = new_state(blank_host.lua, BlankState)
+
+    for visible in (True, False):
+        blank_host.imgui.reset()
+        kept = blank_ui.render(
+            blank,
+            blank_host.lua.table_from({"visible": visible, "locked": False}))
+        res.check(not blank_host.imgui.calls,
+                  "an empty window appeared with no Incursion in progress")
+        res.check(kept is visible,
+                  "the window changed its own visibility with no run to show")
+
+    # No clock to reset at the end of this suite: every case above builds and
+    # discards its own host, so nothing it advanced is shared with any other
+    # suite -- which is why the eight existing report lines are unaffected.
 
     return res
 
