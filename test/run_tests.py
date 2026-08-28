@@ -1764,7 +1764,8 @@ def test_ui():
                   "describes: %s" % (name, first_diff(got, want)))
         # Holds whatever the window contains, and Phase 3 leans on it: an
         # unbalanced stack corrupts every frame drawn after this one.
-        res.check(bal["window"] == 0 and bal["style_var"] == 0,
+        res.check(bal["window"] == 0 and bal["style_var"] == 0
+                  and bal["style_color"] == 0,
                   "the %s window left the ImGui stacks unbalanced: %r"
                   % (name, bal))
         res.check(shown is True,
