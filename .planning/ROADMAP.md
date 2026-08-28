@@ -62,12 +62,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. The failure list from a full run is **exactly three entries**, one each for FIX-01, FIX-02 and FIX-03, each named in user terms (e.g. "counted a bonus payout as a cleared phase"). No previously-green suite regresses, and the pre-existing check count does not fall.
   5. The addon source is unchanged by this phase — `git diff` over `inctrack/` is empty.
 
-**Plans**: 1/3 plans executed
+**Plans**: 2/3 plans executed
 
 Plans:
 
 - [x] 01-01-PLAN.md — The stub layer (`test/stubs.py`), the isolated host bootstrap, upvalue reflection, and `Result.xfail`
-- [ ] 01-02-PLAN.md — The `ui:` suite: pure helpers, the `STAT_SHORT` ordering contract, six render snapshots, and the FIX-03 expected failure
+- [x] 01-02-PLAN.md — The `ui:` suite: pure helpers, the `STAT_SHORT` ordering contract, six render snapshots, and the FIX-03 expected failure
 - [ ] 01-03-PLAN.md — The `addon:` suite, the FIX-01 and FIX-02 expected failures, and the exactly-three guard
 
 ### Phase 2: The Three Defects
@@ -168,7 +168,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. The Net | 1/3 | In Progress|  |
+| 1. The Net | 2/3 | In Progress|  |
 | 2. The Three Defects | 0/TBD | Not started | - |
 | 3. Fragile Paths | 0/TBD | Not started | - |
 | 4. Cost and Record | 0/TBD | Not started | - |
