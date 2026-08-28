@@ -77,7 +77,14 @@ IMGUI_CHUNK = """
 local PX_PER_CHAR = 7.0
 
 -- The x a drawing call starts a fresh line at (ImGui's window padding).
-local PADDING = 8.0
+--
+-- Deliberately not 8: ui.lua's file default for origin_x is 8 (ui.lua:67) and
+-- it is overwritten with GetCursorPosX() inside Begin (ui.lua:408). A stub
+-- padding of 8 makes that assignment a no-op, so every right-aligned value
+-- and wrap position in every window is identical whether or not the line
+-- runs -- one of render's statements invisible to a suite that claims to
+-- cover the whole window.
+local PADDING = 11.0
 
 -- Nominal width of a fill-width (-1) item, for cursor bookkeeping only.
 local FULL_W = 300.0
@@ -363,6 +370,8 @@ class ImGuiRecorder:
     arm_close()    -- arm a one-shot 'the user clicked close this frame'
     snapshot(...)  -- the log as reviewable multi-line text
     counts         -- per-entry-point call counts
+    padding        -- the cursor x at the top of a window, i.e. what ui.lua
+                      captures as origin_x
     balance()      -- push/pop balance of the three ImGui stacks
     api            -- the Lua imgui table itself
     """
@@ -388,6 +397,16 @@ class ImGuiRecorder:
     @property
     def counts(self):
         return {k: int(v) for k, v in self._s["counts"].items()}
+
+    @property
+    def padding(self):
+        """Where the stub puts the cursor at the top of a window.
+
+        This is what GetCursorPosX() reports inside Begin, and therefore what
+        ui.lua:408 captures as origin_x -- a test can assert the window took
+        its left edge from ImGui rather than from its own file default.
+        """
+        return float(self._s["padding"])
 
     def reset(self):
         self._s["reset"]()

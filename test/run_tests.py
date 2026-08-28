@@ -1309,25 +1309,25 @@ Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocus
   SameLine
   TextColored dim '. Normal'
   SameLine
-  SetCursorPosX 252
+  SetCursorPosX 255
   TextColored text '~1:26:00'
   PushStyleColor 40 bar_kills
   ProgressBar 0.80 [-1, 16] 'Phase #3  12/15'
   PopStyleColor 1
-  PushTextWrapPos 308
+  PushTextWrapPos 311
   TextColored dim 'Nest Weevil, Nest Hornet, Nest Beetle'
   PopTextWrapPos
   TextColored dim 'Next: '
   SameLine
   TextColored text 'Nest Matriarch'
   SameLine
-  SetCursorPosX 266
+  SetCursorPosX 269
   TextColored dim '(H-11)'
   TextColored dim 'Phases cleared '
   SameLine
   TextColored text '2'
   SameLine
-  SetCursorPosX 224
+  SetCursorPosX 227
   TextColored dim 'Elapsed 4:00'
 End
 PopStyleVar 1
@@ -1343,7 +1343,7 @@ Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocus
   SameLine
   TextColored dim '. Normal'
   SameLine
-  SetCursorPosX 252
+  SetCursorPosX 255
   TextColored text '~1:20:00'
   PushStyleColor 40 bar_boss
   ProgressBar 1 [-1, 16] 'BOSS  Nest Matriarch  (H-11)'
@@ -1352,7 +1352,7 @@ Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocus
   SameLine
   TextColored text '2'
   SameLine
-  SetCursorPosX 217
+  SetCursorPosX 220
   TextColored dim 'Elapsed 10:00'
 End
 PopStyleVar 1
@@ -1370,21 +1370,21 @@ Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocus
   SameLine
   TextColored dim '. Normal'
   SameLine
-  SetCursorPosX 273
+  SetCursorPosX 276
   TextColored dim '--:--'
   TextColored dim 'Waiting for next objective...'
   TextColored bonus 'BONUS '
   SameLine
   TextColored text 'Gilded Crawler  2/5'
   SameLine
-  SetCursorPosX 280
+  SetCursorPosX 283
   TextColored text '6:00'
   PushStyleColor 40 bar_bonus
   ProgressBar 0.40 [-1, 5] ''
   PopStyleColor 1
   TextColored dim 'Hives Smoked'
   SameLine
-  SetCursorPosX 287
+  SetCursorPosX 290
   TextColored text '1/3'
   PushStyleColor 40 bar_extra
   ProgressBar 0.33 [-1, 5] ''
@@ -1393,15 +1393,15 @@ Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocus
   SameLine
   TextColored text '0'
   SameLine
-  SetCursorPosX 224
+  SetCursorPosX 227
   TextColored dim 'Elapsed 4:00'
   TextColored boon 'Warden's Vigil'
   SameLine
-  SetCursorPosX 203
+  SetCursorPosX 206
   TextColored dim 'WS Acc+15 STP+8'
   TextColored boon 'Hivewarden's Guard'
   SameLine
-  SetCursorPosX 217
+  SetCursorPosX 220
   TextColored dim 'VIT+10 DT-15%'
 End
 PopStyleVar 1
@@ -1419,20 +1419,20 @@ Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocus
   SameLine
   TextColored dim '. Normal'
   SameLine
-  SetCursorPosX 266
+  SetCursorPosX 269
   TextColored text '~36:00'
   TextColored warn 'reconnected - awaiting update'
   PushStyleColor 40 bar_stale
   ProgressBar 0.07 [-1, 16] 'Phase #5  1/15 ?'
   PopStyleColor 1
-  PushTextWrapPos 308
+  PushTextWrapPos 311
   TextColored warn 'Nest Weevil, Nest Hornet, Nest Beetle  (?)'
   PopTextWrapPos
   TextColored dim 'Phases cleared '
   SameLine
   TextColored text '4'
   SameLine
-  SetCursorPosX 224
+  SetCursorPosX 227
   TextColored dim 'Elapsed 5:00'
 End
 PopStyleVar 1
@@ -1456,7 +1456,7 @@ Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocus
   SameLine
   TextColored text '0'
   SameLine
-  SetCursorPosX 217
+  SetCursorPosX 220
   TextColored dim 'Elapsed 48:44'
 End
 PopStyleVar 1
@@ -1475,18 +1475,18 @@ Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocus
   SameLine
   TextColored dim '. Normal'
   SameLine
-  SetCursorPosX 273
+  SetCursorPosX 276
   TextColored dim '--:--'
   TextColored dim 'Waiting for next objective...'
   TextColored dim 'Phases cleared '
   SameLine
   TextColored text '0'
   SameLine
-  SetCursorPosX 224
+  SetCursorPosX 227
   TextColored dim 'Elapsed 1:00'
   TextColored boon 'Sealbreaker's Gift'
   SameLine
-  SetCursorPosX 203
+  SetCursorPosX 206
   TextColored dim 'DT-15% Cure+10%'
 End
 PopStyleVar 1
@@ -1749,6 +1749,30 @@ def test_ui():
         res.check(shown is True,
                   "the %s window hid itself although nobody asked it to"
                   % name)
+
+    # --- the left edge every right-aligned value is measured from ---------
+
+    # ui.lua declares origin_x = 8 at file scope and overwrites it with
+    # GetCursorPosX() inside Begin (ui.lua:67 and :408). The stub's padding is
+    # deliberately not 8 (stubs.py), so dropping that line is observable:
+    # without this check every window above would be byte-identical whether or
+    # not the addon ever asks ImGui where the content starts, and a real
+    # window whose padding is not 8 would draw every right-aligned value and
+    # every wrap position in the wrong place.
+    edge_host = make_host()
+    edge_parser = edge_host.require("parser")
+    EdgeState = edge_host.require("state")
+    edge_ui = edge_host.require("ui")
+    edge = new_state(edge_host.lua, EdgeState)
+    feed(edge, edge_parser, ["Incursion [%s] Begins! (Normal)" % INSTANCE])
+    edge_host.imgui.reset()
+    edge_ui.render(
+        edge, edge_host.lua.table_from({"visible": True, "locked": False}))
+    after = float(lua_locals(edge_host, edge_ui.render)["origin_x"])
+    res.check(after == edge_host.imgui.padding,
+              "the window did not take its left edge from ImGui, so every "
+              "right-aligned value and every wrapped line is measured from a "
+              "guess: %r, not %r" % (after, edge_host.imgui.padding))
 
     # Nothing to draw yet: not an empty window, no window at all.
     blank_host = make_host()
