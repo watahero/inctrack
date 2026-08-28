@@ -21,7 +21,28 @@ Contents:
                               returns an AshitaHost
 """
 
+import sys
+
 import lupa
+
+
+def lua_type(value):
+    """`lupa.lua_type`, dispatched to the backend that built `value`.
+
+    The module-level `lupa.lua_type` only recognises proxies from the one Lua
+    that a plain `lupa.LuaRuntime()` resolves to. Hand it a table built by
+    `lupa.luajit21` -- the dialect Ashita actually embeds -- and it answers
+    None, so every "is this a Lua table?" test in the harness silently reads
+    false: the p_open box in a recorded Begin stops being recognised, and the
+    window snapshot the ui suite compares against is decided by which lupa the
+    contributor happens to have. Dispatch on the proxy's own module so the
+    answer is the same on every backend.
+    """
+    module = sys.modules.get(type(value).__module__)
+    dispatch = getattr(module, "lua_type", None)
+    if dispatch is None:
+        return lupa.lua_type(value)
+    return dispatch(value)
 
 
 # --------------------------------------------------------------------------
@@ -261,7 +282,7 @@ def window_flags(value):
 
 def _seq(value):
     """A Lua array (or any Python sequence) as a plain Python list."""
-    if lupa.lua_type(value) == "table":
+    if lua_type(value) == "table":
         return [value[i] for i in range(1, len(value) + 1)]
     return list(value)
 
@@ -289,11 +310,22 @@ def _color_map(colors):
 
 
 def _num(value):
-    """Integers plainly, fractions to two decimals -- diffable either way."""
+    """Integers plainly, fractions to two decimals -- diffable either way.
+
+    Normalised before formatting rather than branched on the Python type,
+    because that type is decided by whichever Lua `lupa` resolved to and not
+    by the addon: LuaJIT (the dialect Ashita embeds) hands an integral double
+    back as a Python int, while Lua 5.4+ hands the same value back as a
+    float. Branching on it made every inline window in the ui suite pass on
+    one backend and fail on the other, blaming ui.lua for a defect in this
+    recorder. 252 and 252.0 must render identically or the snapshots are
+    pinned to one contributor's build of lupa.
+    """
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, int):
-        return "%d" % value
+    value = float(value)
+    if value == int(value):
+        return "%d" % int(value)
     return "%.2f" % value
 
 
@@ -313,7 +345,7 @@ def _render(value, cmap):
         return "'" + value.decode("latin-1") + "'"
     if isinstance(value, str):
         return "'" + value + "'"
-    if lupa.lua_type(value) == "table":
+    if lua_type(value) == "table":
         items = _seq(value)
         if cmap:
             name = cmap.get(_color_key(items))
@@ -416,7 +448,7 @@ class ImGuiRecorder:
         if args:
             parts.append(_render(args[0], cmap))
         box = args[1] if len(args) > 1 else None
-        if lupa.lua_type(box) == "table":
+        if lua_type(box) == "table":
             parts.append("p_open=" + _render(box, cmap))
             flags = args[2] if len(args) > 2 else None
         else:

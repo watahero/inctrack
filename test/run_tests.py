@@ -52,6 +52,7 @@ import os
 import re
 import sys
 import glob
+import importlib
 
 import lupa
 
@@ -116,8 +117,33 @@ POINTS = re.compile(r"^(\S+) gains (\d+) incursion points\.$")
 PHASE = re.compile(r"^Incursion \[(.+?)\] Phase #(\d+) (\d+)/(\d+)$")
 
 
+# Which Lua sits behind lupa is not the addon's choice and is not stable
+# across installs: lupa 2.8 ships lua51..lua55, luajit20 and luajit21, and
+# plain LuaRuntime() resolves to whichever was built in. Ashita embeds LuaJIT
+# 2.1. Nothing in this harness may depend on that resolution -- the ui suite's
+# window snapshots once did, and were green on Lua 5.5 while six of them
+# failed on LuaJIT, blaming ui.lua for a formatting choice in the recorder.
+# The resolved implementation is printed in the run header so a mismatch is
+# visible rather than inferred, and INCTRACK_LUA pins it for anyone checking a
+# change against the dialect the addon actually ships against:
+#
+#     INCTRACK_LUA=luajit21 python test/run_tests.py
+def lua_runtime():
+    """A fresh Lua runtime: the backend named by INCTRACK_LUA, else lupa's."""
+    name = os.environ.get("INCTRACK_LUA")
+    if not name:
+        return lupa.LuaRuntime()
+    try:
+        backend = importlib.import_module("lupa." + name)
+    except ImportError:
+        raise SystemExit(
+            "INCTRACK_LUA=%s: this lupa build has no such Lua (it ships "
+            "lua51..lua55, luajit20 and luajit21)" % name)
+    return backend.LuaRuntime()
+
+
 def make_lua():
-    lua = lupa.LuaRuntime()
+    lua = lua_runtime()
     lua.execute(
         "package.path = [[%s\\?.lua;]] .. package.path" % ADDON.replace("\\", "\\\\")
     )
@@ -188,7 +214,7 @@ class Host(stubs.AshitaHost):
     """
 
     def __init__(self, player=PLAYER, profile=None):
-        lua = lupa.LuaRuntime()
+        lua = lua_runtime()
         lua.execute(
             "package.path = [[%s\\?.lua;]] .. package.path" % ADDON.replace("\\", "\\\\")
         )
@@ -1283,25 +1309,25 @@ Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocus
   SameLine
   TextColored dim '. Normal'
   SameLine
-  SetCursorPosX 252.00
+  SetCursorPosX 252
   TextColored text '~1:26:00'
   PushStyleColor 40 bar_kills
   ProgressBar 0.80 [-1, 16] 'Phase #3  12/15'
   PopStyleColor 1
-  PushTextWrapPos 308.00
+  PushTextWrapPos 308
   TextColored dim 'Nest Weevil, Nest Hornet, Nest Beetle'
   PopTextWrapPos
   TextColored dim 'Next: '
   SameLine
   TextColored text 'Nest Matriarch'
   SameLine
-  SetCursorPosX 266.00
+  SetCursorPosX 266
   TextColored dim '(H-11)'
   TextColored dim 'Phases cleared '
   SameLine
   TextColored text '2'
   SameLine
-  SetCursorPosX 224.00
+  SetCursorPosX 224
   TextColored dim 'Elapsed 4:00'
 End
 PopStyleVar 1
@@ -1317,16 +1343,16 @@ Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocus
   SameLine
   TextColored dim '. Normal'
   SameLine
-  SetCursorPosX 252.00
+  SetCursorPosX 252
   TextColored text '~1:20:00'
   PushStyleColor 40 bar_boss
-  ProgressBar 1.00 [-1, 16] 'BOSS  Nest Matriarch  (H-11)'
+  ProgressBar 1 [-1, 16] 'BOSS  Nest Matriarch  (H-11)'
   PopStyleColor 1
   TextColored dim 'Phases cleared '
   SameLine
   TextColored text '2'
   SameLine
-  SetCursorPosX 217.00
+  SetCursorPosX 217
   TextColored dim 'Elapsed 10:00'
 End
 PopStyleVar 1
@@ -1344,21 +1370,21 @@ Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocus
   SameLine
   TextColored dim '. Normal'
   SameLine
-  SetCursorPosX 273.00
+  SetCursorPosX 273
   TextColored dim '--:--'
   TextColored dim 'Waiting for next objective...'
   TextColored bonus 'BONUS '
   SameLine
   TextColored text 'Gilded Crawler  2/5'
   SameLine
-  SetCursorPosX 280.00
+  SetCursorPosX 280
   TextColored text '6:00'
   PushStyleColor 40 bar_bonus
   ProgressBar 0.40 [-1, 5] ''
   PopStyleColor 1
   TextColored dim 'Hives Smoked'
   SameLine
-  SetCursorPosX 287.00
+  SetCursorPosX 287
   TextColored text '1/3'
   PushStyleColor 40 bar_extra
   ProgressBar 0.33 [-1, 5] ''
@@ -1367,15 +1393,15 @@ Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocus
   SameLine
   TextColored text '0'
   SameLine
-  SetCursorPosX 224.00
+  SetCursorPosX 224
   TextColored dim 'Elapsed 4:00'
   TextColored boon 'Warden's Vigil'
   SameLine
-  SetCursorPosX 203.00
+  SetCursorPosX 203
   TextColored dim 'WS Acc+15 STP+8'
   TextColored boon 'Hivewarden's Guard'
   SameLine
-  SetCursorPosX 217.00
+  SetCursorPosX 217
   TextColored dim 'VIT+10 DT-15%'
 End
 PopStyleVar 1
@@ -1393,20 +1419,20 @@ Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocus
   SameLine
   TextColored dim '. Normal'
   SameLine
-  SetCursorPosX 266.00
+  SetCursorPosX 266
   TextColored text '~36:00'
   TextColored warn 'reconnected - awaiting update'
   PushStyleColor 40 bar_stale
   ProgressBar 0.07 [-1, 16] 'Phase #5  1/15 ?'
   PopStyleColor 1
-  PushTextWrapPos 308.00
+  PushTextWrapPos 308
   TextColored warn 'Nest Weevil, Nest Hornet, Nest Beetle  (?)'
   PopTextWrapPos
   TextColored dim 'Phases cleared '
   SameLine
   TextColored text '4'
   SameLine
-  SetCursorPosX 224.00
+  SetCursorPosX 224
   TextColored dim 'Elapsed 5:00'
 End
 PopStyleVar 1
@@ -1430,7 +1456,7 @@ Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocus
   SameLine
   TextColored text '0'
   SameLine
-  SetCursorPosX 217.00
+  SetCursorPosX 217
   TextColored dim 'Elapsed 48:44'
 End
 PopStyleVar 1
@@ -1449,18 +1475,18 @@ Begin 'inctrack###incursion_window' p_open=[true] flags=AlwaysAutoResize|NoFocus
   SameLine
   TextColored dim '. Normal'
   SameLine
-  SetCursorPosX 273.00
+  SetCursorPosX 273
   TextColored dim '--:--'
   TextColored dim 'Waiting for next objective...'
   TextColored dim 'Phases cleared '
   SameLine
   TextColored text '0'
   SameLine
-  SetCursorPosX 224.00
+  SetCursorPosX 224
   TextColored dim 'Elapsed 1:00'
   TextColored boon 'Sealbreaker's Gift'
   SameLine
-  SetCursorPosX 203.00
+  SetCursorPosX 203
   TextColored dim 'DT-15% Cure+10%'
 End
 PopStyleVar 1
@@ -1767,7 +1793,7 @@ def test_ui():
         close_host.lua.table_from({"visible": True, "locked": False}))
 
     begins = [args for name, args in close_host.imgui.calls if name == "Begin"]
-    offered_close = any(len(args) > 1 and lupa.lua_type(args[1]) == "table"
+    offered_close = any(len(args) > 1 and stubs.lua_type(args[1]) == "table"
                         for args in begins)
 
     res.xfail((not offered_close) or still_shown is False,
@@ -1879,7 +1905,7 @@ def test_addon_shell():
               "a chat line the addon could not read produced %d complaints "
               "instead of one, or took the chat handler down with it: %r"
               % (len(errors), bad.chat[before:]))
-    res.check(lupa.lua_type(e["message"]) == "table",
+    res.check(stubs.lua_type(e["message"]) == "table",
               "the chat handler rewrote the message it was handed")
     res.check(e["blocked"] is None,
               "the chat handler swallowed a line the player was meant to see")
@@ -2244,6 +2270,9 @@ def main():
     lua, parser, State = make_lua()
 
     print("inctrack tests")
+    print("  lua: %s%s" % (getattr(lua, "lua_implementation", "unknown"),
+                           " (INCTRACK_LUA)" if os.environ.get("INCTRACK_LUA")
+                           else ""))
 
     suites = []
 
