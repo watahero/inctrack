@@ -1951,9 +1951,14 @@ def test_addon_shell():
     # which raises for a table. A number would not do -- numbers share the
     # string metatable, so (5):strip_colors() coerces and succeeds, the
     # handler runs to completion, and no parse-error line is ever produced.
+    # Every text_in here is fired with the event table Ashita really supplies
+    # (stubs.TEXT_IN_FIELDS), because the read-only guarantee is about the
+    # fields the host reads back: the player sees `message_modified` if the
+    # handler wrote one, not `message`. Asserting on `message` alone would
+    # leave a handler that rewrote chat in game entirely undetected.
     bad = loaded_host()
     before = len(bad.chat)
-    e = bad.fire("text_in", message=bad.lua.table_from({"not": "a string"}))
+    e = bad.fire_text_in(bad.lua.table_from({"not": "a string"}))
     errors = [line for line in bad.chat[before:] if "parse error" in line]
     res.check(len(errors) == 1,
               "a chat line the addon could not read produced %d complaints "
@@ -1961,6 +1966,10 @@ def test_addon_shell():
               % (len(errors), bad.chat[before:]))
     res.check(stubs.lua_type(e["message"]) == "table",
               "the chat handler rewrote the message it was handed")
+    res.check(e["message_modified"] is None and e["mode_modified"] is None
+              and e["indent_modified"] is None,
+              "the chat handler rewrote the line the player sees, after "
+              "failing to read it: %r" % (e["message_modified"],))
     res.check(e["blocked"] is None,
               "the chat handler swallowed a line the player was meant to see")
     res.check(shell_run(bad) is None,
@@ -1969,9 +1978,13 @@ def test_addon_shell():
     # Read-only on the ordinary path too. This is the guarantee the comment at
     # inctrack.lua:156 makes and that nothing has tested until now.
     ordinary = begins()
-    e = bad.fire("text_in", message=ordinary)
+    e = bad.fire_text_in(ordinary)
     res.check(e["message"] == ordinary,
               "the chat handler rewrote an ordinary line: %r" % (e["message"],))
+    res.check(e["message_modified"] is None and e["mode_modified"] is None
+              and e["indent_modified"] is None,
+              "the chat handler rewrote the line the player sees: %r"
+              % (e["message_modified"],))
     res.check(e["blocked"] is None,
               "the chat handler blocked an ordinary line")
 
@@ -1980,8 +1993,7 @@ def test_addon_shell():
     idle = loaded_host()
     saves_before = idle.saves
     chat_before = len(idle.chat)
-    idle.fire("text_in",
-              message="Godwen hits the Nest Weevil for 42 points of damage.")
+    idle.fire_text_in("Godwen hits the Nest Weevil for 42 points of damage.")
     res.check(idle.saves == saves_before,
               "an unrelated combat line wrote settings to disk")
     res.check(len(idle.chat) == chat_before,
@@ -1998,23 +2010,23 @@ def test_addon_shell():
     res.check(saver.saves == 0,
               "loading with nothing saved still wrote to disk")
 
-    saver.fire("text_in", message=begins())
+    saver.fire_text_in(begins())
     res.check(saver.saves == 1,
               "the start of a run was not written down immediately (%d writes)"
               % saver.saves)
 
-    saver.fire("text_in", message=phase_line(1, 3))
+    saver.fire_text_in(phase_line(1, 3))
     res.check(saver.saves == 1,
               "a kill count arriving a moment later forced a second disk "
               "write (%d writes)" % saver.saves)
 
     saver.tick(6.0)
-    saver.fire("text_in", message=phase_line(1, 3))
+    saver.fire_text_in(phase_line(1, 3))
     res.check(saver.saves == 2,
               "a kill count past the throttle window was not written down "
               "(%d writes)" % saver.saves)
 
-    saver.fire("text_in", message=SHELL_BOON)
+    saver.fire_text_in(SHELL_BOON)
     res.check(saver.saves == 3,
               "a boon -- which the server never announces again -- was left "
               "unwritten because a kill count had just been saved (%d writes)"
@@ -2070,7 +2082,7 @@ def test_addon_shell():
               "the addon claimed to know who the player is before the game "
               "could tell it")
     late.set_party_name(PLAYER)
-    late.fire("text_in", message=begins())
+    late.fire_text_in(begins())
     res.check(shell_state(late)["player"] == PLAYER,
               "the player's name was never picked up once it became "
               "available, so their own points would be filtered out forever")
@@ -2079,8 +2091,8 @@ def test_addon_shell():
     # anyone's points while the player is unknown is a recorded risk with no
     # requirement behind it either way, and blessing it here would be a
     # promise this milestone has not made.
-    late.fire("text_in", message="Vidikh gains 999 incursion points.")
-    late.fire("text_in", message="%s gains 84 incursion points." % PLAYER)
+    late.fire_text_in("Vidikh gains 999 incursion points.")
+    late.fire_text_in("%s gains 84 incursion points." % PLAYER)
     run = shell_run(late)
     res.check(run is not None and int(run["points"]) == 84,
               "another player's points were counted as the player's own: %r"
@@ -2092,12 +2104,12 @@ def test_addon_shell():
     # show one character's Incursion to another, or filter out the new
     # character's own points.
     other = loaded_host(player="Vidikh")
-    other.fire("text_in", message=begins(SHELL_OTHER))
-    other.fire("text_in", message=phase_line(2, 5, 18, SHELL_OTHER))
+    other.fire_text_in(begins(SHELL_OTHER))
+    other.fire_text_in(phase_line(2, 5, 18, SHELL_OTHER))
     other.fire("unload")
 
     switched = loaded_host()
-    switched.fire("text_in", message=begins())
+    switched.fire_text_in(begins())
     switched.addon["incursion"]["override"] = False   # a manual hide
     saves_before = switched.saves
     switched.switch_profile(
@@ -2173,7 +2185,7 @@ def test_addon_shell():
     # --- reset ---------------------------------------------------------------
 
     clearing = loaded_host()
-    clearing.fire("text_in", message=begins())
+    clearing.fire_text_in(begins())
     clearing.addon["incursion"]["override"] = True
     saves_before = clearing.saves
     clearing.fire("command", command="/incursion reset")
@@ -2237,7 +2249,7 @@ def test_addon_shell():
     # --- an unrecognised subcommand explains itself and does nothing else ---
 
     usage = loaded_host()
-    usage.fire("text_in", message=begins())
+    usage.fire_text_in(begins())
     saves_before = usage.saves
     auto_before = usage.settings["auto"]
     locked_before = usage.settings["locked"]
@@ -2271,7 +2283,7 @@ def test_addon_shell():
     res.check(visible() is False,
               "the window was on screen with no Incursion in progress")
 
-    look.fire("text_in", message=begins())
+    look.fire_text_in(begins())
     res.check(visible() is True,
               "the window stayed hidden through a run the player is standing "
               "in, with automatic show/hide on")
@@ -2298,8 +2310,8 @@ def test_addon_shell():
               "a frame drew something with no Incursion in progress: %r"
               % (frame.imgui.calls[:4],))
 
-    frame.fire("text_in", message=begins())
-    frame.fire("text_in", message=phase_line(1, 3))
+    frame.fire_text_in(begins())
+    frame.fire_text_in(phase_line(1, 3))
     override_before = frame.addon["incursion"]["override"]
     frame.imgui.reset()
     frame.fire("d3d_present")

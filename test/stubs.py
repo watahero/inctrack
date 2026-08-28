@@ -955,6 +955,25 @@ package.loaded['json'] = json;
 """
 
 
+# Ashita v4's text_in event table, as the real host supplies it -- and reads
+# it back. An addon does not rewrite a chat line by assigning to `e.message`:
+# the host looks at `message_modified` (and `mode_modified`, `indent_modified`)
+# to decide what the player actually sees, and at `blocked` to decide whether
+# they see it at all. An event table carrying only `message` therefore cannot
+# prove the read-only guarantee at inctrack.lua:156 -- a handler that rewrote
+# chat in game would leave every assertion about `message` untouched.
+TEXT_IN_FIELDS = {
+    "mode": 0,
+    "indent": 0,
+    "message": "",
+    "mode_modified": None,
+    "indent_modified": None,
+    "message_modified": None,
+    "blocked": None,
+    "injected": False,
+}
+
+
 class AshitaHost:
     """Python-side handle on the in-memory Ashita host.
 
@@ -962,6 +981,7 @@ class AshitaHost:
     require(name)       -- require a module inside that runtime
     events              -- event name -> registered handler
     fire(event, **kw)   -- build the event table, call the handler, return it
+    fire_text_in(msg)   -- fire text_in with the host's real event shape
     chat                -- the captured console lines
     settings            -- the live settings table the addon holds
     saves               -- how many settings.save() calls happened
@@ -1010,6 +1030,19 @@ class AshitaHost:
         e = self.lua.table_from(dict(fields))
         handler(e)
         return e
+
+    def fire_text_in(self, message):
+        """Fire text_in with the event table Ashita really hands a handler.
+
+        Nil-valued fields are left out rather than set: in Lua an absent key
+        and a nil value are the same thing, so this way a *_modified key
+        existing at all means the handler wrote it, which is exactly the
+        question the read-only guarantee turns on.
+        """
+        fields = dict(TEXT_IN_FIELDS)
+        fields["message"] = message
+        return self.fire("text_in", **{k: v for k, v in fields.items()
+                                       if v is not None})
 
     @property
     def chat(self):
