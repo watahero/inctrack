@@ -1659,6 +1659,280 @@ def test_ui():
     return res
 
 
+# --------------------------------------------------------------------------
+# 10. the addon shell: registration, text_in, persistence, profiles
+# --------------------------------------------------------------------------
+
+# Invented content in the server's established wording. This suite reads no
+# chatlogs and needs no Ashita install (COVR-04): every fixture below is a
+# chat line written out here, and nothing in it opens a file.
+SHELL_INSTANCE = "Crawlers' Nest Depths"
+SHELL_OTHER = "Hivewarden Vaults"
+SHELL_BOON = ("%s gains the effect of Warden's Vigil (X): "
+              "WS Accuracy+15 / Store TP+8" % PLAYER)
+
+
+def begins(instance=SHELL_INSTANCE):
+    return "Incursion [%s] Begins! (Normal)" % instance
+
+
+def phase_line(n, cur, mx=15, instance=SHELL_INSTANCE):
+    return "Incursion [%s] Phase #%d %d/%d" % (instance, n, cur, mx)
+
+
+def loaded_host(player=PLAYER, profile=None):
+    """A host with inctrack.lua required and its load handler fired.
+
+    The addon registers its handlers at require time and does everything else
+    -- the banner, the player name, resuming a saved run -- inside the load
+    handler, which is exactly how Ashita drives it.
+    """
+    host = make_host(player=player, profile=profile)
+    host.require("inctrack")
+    host.tick(0)
+    host.fire("load")
+    return host
+
+
+def shell_state(host):
+    """The State instance the shell holds. lupa does not bind self, so the
+    caller passes the receiver explicitly: state.snapshot(state)."""
+    return host.addon["incursion"]["state"]
+
+
+def shell_run(host):
+    state = shell_state(host)
+    return state.snapshot(state)
+
+
+def test_addon_shell():
+    """inctrack.lua, against the stubbed Ashita host.
+
+    The shell exports nothing and may not be edited this phase, so its
+    file-scope state -- the incursion table, visible(), reset(), persist() --
+    is reached through host.addon by upvalue reflection. Assertions are on the
+    behaviour that results (what the run holds, what reached chat, how many
+    saves happened, what string was written), not on call sequences (D-03).
+    """
+    res = Result("addon: load, chat, settings, commands")
+
+    # --- every handler the addon needs in game is actually registered ------
+
+    host = make_host()
+    host.require("inctrack")
+
+    for event in ("load", "unload", "text_in", "d3d_present", "command"):
+        res.check(event in host.events,
+                  "the addon never asked the game for the %s event, so that "
+                  "whole path is dead once installed" % event)
+    res.check(host.profile_callback is not None,
+              "nothing listens for a character change, so one character's run "
+              "would follow the player onto another")
+
+    # --- the load banner, which is how a player tells this addon apart ----
+
+    version = host.lua.globals()["addon"]["version"]
+    host.tick(0)
+    host.fire("load")
+    banner = [line for line in host.chat if version in line]
+    res.check(len(banner) == 1,
+              "the banner naming this build reached chat %d times, not once: "
+              "%r" % (len(banner), host.chat))
+    res.check(bool(banner) and banner[0].startswith("[inctrack] "),
+              "the banner does not identify itself as inctrack, so it cannot "
+              "be told from another Incursion addon: %r" % banner)
+
+    # --- the pcall boundary at inctrack.lua:160 ---------------------------
+
+    # Forced from outside rather than by editing the addon: a Lua table as the
+    # message. The handler's first real act is a string method call on it,
+    # which raises for a table. A number would not do -- numbers share the
+    # string metatable, so (5):strip_colors() coerces and succeeds, the
+    # handler runs to completion, and no parse-error line is ever produced.
+    bad = loaded_host()
+    before = len(bad.chat)
+    e = bad.fire("text_in", message=bad.lua.table_from({"not": "a string"}))
+    errors = [line for line in bad.chat[before:] if "parse error" in line]
+    res.check(len(errors) == 1,
+              "a chat line the addon could not read produced %d complaints "
+              "instead of one, or took the chat handler down with it: %r"
+              % (len(errors), bad.chat[before:]))
+    res.check(lupa.lua_type(e["message"]) == "table",
+              "the chat handler rewrote the message it was handed")
+    res.check(e["blocked"] is None,
+              "the chat handler swallowed a line the player was meant to see")
+    res.check(shell_run(bad) is None,
+              "a chat line that could not be read still started a run")
+
+    # Read-only on the ordinary path too. This is the guarantee the comment at
+    # inctrack.lua:156 makes and that nothing has tested until now.
+    ordinary = begins()
+    e = bad.fire("text_in", message=ordinary)
+    res.check(e["message"] == ordinary,
+              "the chat handler rewrote an ordinary line: %r" % (e["message"],))
+    res.check(e["blocked"] is None,
+              "the chat handler blocked an ordinary line")
+
+    # --- a line that is none of the addon's business costs nothing --------
+
+    idle = loaded_host()
+    saves_before = idle.saves
+    chat_before = len(idle.chat)
+    idle.fire("text_in",
+              message="Godwen hits the Nest Weevil for 42 points of damage.")
+    res.check(idle.saves == saves_before,
+              "an unrelated combat line wrote settings to disk")
+    res.check(len(idle.chat) == chat_before,
+              "an unrelated combat line put something in the player's chat")
+    res.check(shell_run(idle) is None,
+              "an unrelated combat line invented a run")
+
+    # --- the MUST_SAVE policy, driven by the injected clock ---------------
+
+    # The only thing standing between a mid-run reload and a blank window for
+    # a whole phase. Events the server never repeats are written the moment
+    # they land; kill counts arrive constantly and ride a five-second throttle.
+    saver = loaded_host()
+    res.check(saver.saves == 0,
+              "loading with nothing saved still wrote to disk")
+
+    saver.fire("text_in", message=begins())
+    res.check(saver.saves == 1,
+              "the start of a run was not written down immediately (%d writes)"
+              % saver.saves)
+
+    saver.fire("text_in", message=phase_line(1, 3))
+    res.check(saver.saves == 1,
+              "a kill count arriving a moment later forced a second disk "
+              "write (%d writes)" % saver.saves)
+
+    saver.tick(6.0)
+    saver.fire("text_in", message=phase_line(1, 3))
+    res.check(saver.saves == 2,
+              "a kill count past the throttle window was not written down "
+              "(%d writes)" % saver.saves)
+
+    saver.fire("text_in", message=SHELL_BOON)
+    res.check(saver.saves == 3,
+              "a boon -- which the server never announces again -- was left "
+              "unwritten because a kill count had just been saved (%d writes)"
+              % saver.saves)
+
+    res.check(saver.sessions[-1] != "",
+              "the run was 'saved' as an empty string, so a reload would come "
+              "back blank")
+    blob = saver.json.decode(saver.sessions[-1])
+    res.check(blob is not None and blob["instance"] == SHELL_INSTANCE,
+              "what was written down does not name the instance the player is "
+              "standing in: %r" % (saver.sessions[-1],))
+
+    # --- unloading mid-run keeps the run ----------------------------------
+
+    before = saver.saves
+    saver.fire("unload")
+    res.check(saver.saves == before + 1,
+              "unloading mid-run did not write the run down")
+    res.check(saver.settings["session"] != "",
+              "unloading mid-run left nothing to come back to")
+
+    # --- the resume round trip, through the stubbed json both ways --------
+
+    resumed = loaded_host(profile={"session": saver.settings["session"]})
+    run = shell_run(resumed)
+    res.check(run is not None and run["instance"] == SHELL_INSTANCE,
+              "a run in progress did not come back after a reload")
+    res.check(run is not None and int(run["phase"]) == 1,
+              "the resumed run lost the phase it was on")
+    res.check(any(("Resumed run in %s" % SHELL_INSTANCE) in line
+                  for line in resumed.chat),
+              "the run came back but the player was never told: %r"
+              % resumed.chat)
+
+    # A saved run that is not readable is discarded whole rather than
+    # half-applied, and the unusable string is cleared so it cannot be retried
+    # on every load forever.
+    corrupt = loaded_host(profile={"session": "not json at all"})
+    res.check(corrupt.settings["session"] == "",
+              "an unreadable saved run was kept and will be retried on every "
+              "load: %r" % (corrupt.settings["session"],))
+    res.check(corrupt.saves == 1,
+              "clearing the unreadable saved run was never written to disk "
+              "(%d writes)" % corrupt.saves)
+    res.check(shell_run(corrupt) is None,
+              "an unreadable saved run left a half-built run behind")
+
+    # --- the player's name, which may not exist yet at load ---------------
+
+    late = loaded_host(player="")
+    res.check(shell_state(late)["player"] is None,
+              "the addon claimed to know who the player is before the game "
+              "could tell it")
+    late.set_party_name(PLAYER)
+    late.fire("text_in", message=begins())
+    res.check(shell_state(late)["player"] == PLAYER,
+              "the player's name was never picked up once it became "
+              "available, so their own points would be filtered out forever")
+
+    # Nothing is asserted about the window before the name resolves: accepting
+    # anyone's points while the player is unknown is a recorded risk with no
+    # requirement behind it either way, and blessing it here would be a
+    # promise this milestone has not made.
+    late.fire("text_in", message="Vidikh gains 999 incursion points.")
+    late.fire("text_in", message="%s gains 84 incursion points." % PLAYER)
+    run = shell_run(late)
+    res.check(run is not None and int(run["points"]) == 84,
+              "another player's points were counted as the player's own: %r"
+              % (run and int(run["points"]),))
+
+    # --- a character change -----------------------------------------------
+
+    # The run and the name belong to the old character. Keeping either would
+    # show one character's Incursion to another, or filter out the new
+    # character's own points.
+    other = loaded_host(player="Vidikh")
+    other.fire("text_in", message=begins(SHELL_OTHER))
+    other.fire("text_in", message=phase_line(2, 5, 18, SHELL_OTHER))
+    other.fire("unload")
+
+    switched = loaded_host()
+    switched.fire("text_in", message=begins())
+    switched.addon["incursion"]["override"] = False   # a manual hide
+    saves_before = switched.saves
+    switched.switch_profile(
+        {"session": other.settings["session"], "locked": True})
+
+    inc = switched.addon["incursion"]
+    run = shell_run(switched)
+    res.check(run is not None and run["instance"] == SHELL_OTHER,
+              "after a character change the window still showed the previous "
+              "character's run: %r" % (run and run["instance"],))
+    res.check(shell_state(switched)["player"] is None,
+              "the previous character's name was kept, so the new character's "
+              "own points would be discarded as somebody else's")
+    res.check(inc["override"] is None,
+              "a window hidden by hand on one character stayed hidden on the "
+              "next")
+    res.check(inc["settings"]["locked"] is True,
+              "the new character's own settings were not adopted")
+    res.check(switched.saves == saves_before + 1,
+              "the character change was never written to disk")
+
+    # A profile switch that carries no settings table at all still saves and
+    # leaves everything else alone.
+    saves_before = switched.saves
+    switched.profile_callback(None)
+    inc = switched.addon["incursion"]
+    run = shell_run(switched)
+    res.check(switched.saves == saves_before + 1,
+              "a settings event with nothing in it skipped the save")
+    res.check(run is not None and run["instance"] == SHELL_OTHER,
+              "a settings event with nothing in it threw the run away")
+    res.check(inc["settings"]["locked"] is True,
+              "a settings event with nothing in it changed the settings")
+
+    return res
+
+
 def main():
     logdir = find_logs()
     libs = find_ashita_libs(logdir)
@@ -1687,6 +1961,7 @@ def main():
     suites.append(test_timers(lua, parser, State))
     suites.append(test_json_roundtrip(lua, parser, State, libs))
     suites.append(test_ui())
+    suites.append(test_addon_shell())
 
     ok = True
     for s in suites:
