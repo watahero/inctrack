@@ -43,8 +43,10 @@ lines, and they never make the run exit non-zero:
   * the run clock not aged by the time spent unloaded     (suite 4)
   * the close button the window asks for and then ignores (suite 9)
 
-main() guards the total against EXPECTED_XFAILS, so a fourth failure -- or a
-fix that landed before its red line could prove anything -- fails the run.
+Each one names the defect it stands for (FIX-01..03), and main() guards both
+the total against EXPECTED_XFAILS and the set of names against
+EXPECTED_DEFECTS -- so a fourth failure, a swap of one defect for another, and
+a fix that landed before its red line could prove anything all fail the run.
 Phase 2 turns all three green without editing their assertions.
 """
 
@@ -328,6 +330,14 @@ FIXED_MARK = "NOW PASSING "
 # drives this number to zero, without editing any of the three assertions.
 EXPECTED_XFAILS = 3
 
+# The identities behind that count. A count alone cannot tell three defects
+# from three *different* defects: one fix landing early plus one regression
+# arriving leaves the total at three and the run green, with the whole point
+# of the mechanism -- that a green line here is as significant as a red one --
+# quietly lost. Each xfail names which defect it stands for and main() compares
+# the set, so a swap cannot pass.
+EXPECTED_DEFECTS = {"FIX-01", "FIX-02", "FIX-03"}
+
 
 class Result:
     def __init__(self, title):
@@ -337,27 +347,36 @@ class Result:
         self.notes = []
         self.xfails = []
         self.fixed = []
+        # The defect ids behind the two lists above, in the same order, for
+        # the identity guard in main().
+        self.xfail_ids = []
+        self.fixed_ids = []
 
     def check(self, cond, msg):
         self.checks += 1
         if not cond:
             self.failures.append(msg)
 
-    def xfail(self, cond, msg):
+    def xfail(self, cond, msg, defect):
         """Assert behaviour the addon is *supposed* to have, knowing a defect
         makes it false today.
 
         Counts as a check like any other. A false condition is the expected
         failure and lands in `xfails`; a condition that unexpectedly holds
-        means the defect is gone and lands in `fixed`, which is loud but does
-        not turn the run red either way. The message names the defect in the
-        user's terms, not the code's.
+        means the defect is gone and lands in `fixed`, which is loud and, via
+        the guard in main(), red -- a defect that stopped reproducing before
+        its own fix landed means the red line never got to prove anything.
+        The message names the defect in the user's terms, not the code's;
+        `defect` is the id main() checks the failure list against, and is
+        required so a new expected failure cannot slip in anonymously.
         """
         self.checks += 1
         if cond:
             self.fixed.append(msg)
+            self.fixed_ids.append(defect)
         else:
             self.xfails.append(msg)
+            self.xfail_ids.append(defect)
 
     def note(self, msg):
         self.notes.append(msg)
@@ -680,7 +699,8 @@ def test_state_units(lua, parser, State):
     res.xfail(after_bonus - after_boss == 0,
               "counted a bonus objective payout as a cleared phase -- the "
               "window went from %d cleared to %d without a phase boss dying"
-              % (after_boss, after_bonus))
+              % (after_boss, after_bonus),
+              "FIX-01")
 
     # Both awards must still add up, so a fix that simply drops the second one
     # is caught rather than mistaken for the real thing.
@@ -738,7 +758,8 @@ def test_state_units(lua, parser, State):
               "left instead of %d, %d seconds elapsed instead of %d, and a "
               "bonus objective that had already run out"
               % (round(back_left), round(saved_left - GAP),
-                 round(back_elapsed), round(saved_elapsed + GAP)))
+                 round(back_elapsed), round(saved_elapsed + GAP)),
+              "FIX-02")
 
     lua.globals()["__clock"] = 0
 
@@ -1830,7 +1851,8 @@ def test_ui():
 
     res.xfail((not offered_close) or still_shown is False,
               "the window asks for a close button and then ignores it -- "
-              "clicking close leaves the window on screen")
+              "clicking close leaves the window on screen",
+              "FIX-03")
 
     # No clock to reset at the end of this suite: every case above builds and
     # discards its own host, so nothing it advanced is shared with any other
@@ -2339,11 +2361,23 @@ def main():
     # with and without chatlogs. Neither line printed here may contain either
     # report marker -- the phase criteria count those in this output.
     known = sum(len(s.xfails) for s in suites)
+    still_red = [d for s in suites for d in s.xfail_ids]
+    early = [d for s in suites for d in s.fixed_ids]
     print()
     print("  %d known defects (expected until Phase 2)" % known)
     if known != EXPECTED_XFAILS:
         print("  guard: this phase closes on exactly %d known defects; the "
               "run reported %d" % (EXPECTED_XFAILS, known))
+        ok = False
+    if sorted(still_red) != sorted(EXPECTED_DEFECTS):
+        print("  guard: the failure list must be exactly %s; it is %s"
+              % (", ".join(sorted(EXPECTED_DEFECTS)),
+                 ", ".join(sorted(still_red)) or "empty"))
+        ok = False
+    if early:
+        print("  guard: %s stopped failing before its fix was written, so the "
+              "red line that was meant to prove the fix never ran"
+              % ", ".join(sorted(early)))
         ok = False
 
     print()
