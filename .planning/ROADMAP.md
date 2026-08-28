@@ -55,7 +55,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. On a machine with **no chatlogs directory and no Ashita install**, `python test/run_tests.py` runs the two new suites to completion and reports a non-zero check count for each — the report header still reads `chatlogs: none`, and coverage of shipped behaviour is not gated on private data.
   4. The failure list from a full run is **exactly three entries**, one each for FIX-01, FIX-02 and FIX-03, each named in user terms (e.g. "counted a bonus payout as a cleared phase"). No previously-green suite regresses, and the pre-existing check count does not fall.
   5. The addon source is unchanged by this phase — `git diff` over `inctrack/` is empty.
-**Plans**: TBD (3 expected)
+**Plans**: 3 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — The stub layer (`test/stubs.py`), the isolated host bootstrap, upvalue reflection, and `Result.xfail`
+- [ ] 01-02-PLAN.md — The `ui:` suite: pure helpers, the `STAT_SHORT` ordering contract, six render snapshots, and the FIX-03 expected failure
+- [ ] 01-03-PLAN.md — The `addon:` suite, the FIX-01 and FIX-02 expected failures, and the exactly-three guard
 
 ### Phase 2: The Three Defects
 **Goal**: The three faults visible in the code as written are gone, and the tests that were red before them are green — demonstrated, not asserted.
@@ -145,7 +150,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. The Net | 0/TBD | Not started | - |
+| 1. The Net | 0/3 | Planned | - |
 | 2. The Three Defects | 0/TBD | Not started | - |
 | 3. Fragile Paths | 0/TBD | Not started | - |
 | 4. Cost and Record | 0/TBD | Not started | - |
