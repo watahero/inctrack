@@ -427,3 +427,9 @@ suites need them exactly as before.
 ---
 *Phase: 01-the-net*
 *Completed: 2026-08-29*
+
+## Self-Check: PASSED
+
+Every file this summary claims exists on disk (`test/run_tests.py`,
+`.planning/phases/01-the-net/01-03-SUMMARY.md`) and all three task commit
+hashes resolve in `git log` (`26f9420`, `1efcaed`, `e7efb4f`).

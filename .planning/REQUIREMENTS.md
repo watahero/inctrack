@@ -20,9 +20,9 @@ The net comes first. All three confirmed defects survived a fully green suite,
 so without new tests a fix can only be asserted, never demonstrated.
 
 - [x] **COVR-01**: `ui.lua` renders under a stubbed ImGui in the test harness, so a given run record can be asserted to produce the expected draw calls, colours and text
-- [ ] **COVR-02**: `inctrack.lua` runs under a stubbed Ashita host in the test harness, covering event registration, the `text_in` handler, settings load/save, the `/incursion` command and its subcommands, and visibility
-- [ ] **COVR-03**: every defect in the Defects category below has a regression test that fails against current code and passes after its fix
-- [ ] **COVR-04**: the new suites run to completion with no chatlogs directory present, so coverage of shipped behaviour is not gated on the author's private data
+- [x] **COVR-02**: `inctrack.lua` runs under a stubbed Ashita host in the test harness, covering event registration, the `text_in` handler, settings load/save, the `/incursion` command and its subcommands, and visibility
+- [x] **COVR-03**: every defect in the Defects category below has a regression test that fails against current code and passes after its fix
+- [x] **COVR-04**: the new suites run to completion with no chatlogs directory present, so coverage of shipped behaviour is not gated on the author's private data
 
 ### Defects
 
@@ -85,9 +85,9 @@ Populated during roadmap creation (2026-08-29). See `.planning/ROADMAP.md` for p
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | COVR-01 | Phase 1 | Complete |
-| COVR-02 | Phase 1 | Pending |
-| COVR-03 | Phase 1 | Pending |
-| COVR-04 | Phase 1 | Pending |
+| COVR-02 | Phase 1 | Complete |
+| COVR-03 | Phase 1 | Complete |
+| COVR-04 | Phase 1 | Complete |
 | FIX-01 | Phase 2 | Pending |
 | FIX-02 | Phase 2 | Pending |
 | FIX-03 | Phase 2 | Pending |
