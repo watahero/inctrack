@@ -30,7 +30,7 @@ Faults visible in the code as written, independent of what the server sends.
 
 - [x] **FIX-01**: a boss kill increments `phases_cleared` exactly once — the count has a single author, not the two at `state.lua:198-202` and `state.lua:358-365`
 - [x] **FIX-02**: after the addon is unloaded and reloaded, `time_left` and the bonus expiry reflect the time that passed while it was gone, using the already-persisted `saved_at` (`state.lua:600-634`)
-- [ ] **FIX-03**: no unreachable close path remains — the window's close affordance either works or is gone (`ui.lua:399`, `inctrack.lua:219-222`, dead under `NoTitleBar`)
+- [x] **FIX-03**: no unreachable close path remains — the window's close affordance either works or is gone (`ui.lua:399`, `inctrack.lua:219-222`, dead under `NoTitleBar`)
 
 ### Hardening
 
@@ -90,7 +90,7 @@ Populated during roadmap creation (2026-08-29). See `.planning/ROADMAP.md` for p
 | COVR-04 | Phase 1 | Complete |
 | FIX-01 | Phase 2 | Complete |
 | FIX-02 | Phase 2 | Complete |
-| FIX-03 | Phase 2 | Pending |
+| FIX-03 | Phase 2 | Complete |
 | HARD-01 | Phase 3 | Pending |
 | HARD-02 | Phase 3 | Pending |
 | HARD-03 | Phase 3 | Pending |

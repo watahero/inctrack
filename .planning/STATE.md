@@ -5,16 +5,16 @@ milestone_name: correctness and cost
 current_phase: 2
 current_phase_name: The Three Defects
 status: executing
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-08-28T23:24:38.647Z"
+stopped_at: Completed 02-02-PLAN.md -- Phase 2 complete, zero known defects
+last_updated: "2026-08-28T23:38:50.656Z"
 last_activity: 2026-08-29
-last_activity_desc: 02-01 complete: FIX-01 and FIX-02 fixed in state.lua; one xfail (FIX-03) remains
-state_head: e04936afa279e686082012d8b04b996426ae8504
+last_activity_desc: "02-01 complete: FIX-01 and FIX-02 fixed in state.lua; one xfail (FIX-03) remains"
+state_head: 459f3ef7fd91e9c61d81810cd370a43c9060fba9
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 5
-  completed_plans: 4
+  completed_plans: 5
   percent: 25
 ---
 
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 ## Current Position
 
 Phase: 2 of 4 (The Three Defects)
-Plan: 1 of 2 in current phase
+Plan: 2 of 2 in current phase
 Status: 02-01 complete — 02-02 (FIX-03) is next
 Last activity: 2026-08-29 — 02-01 complete: FIX-01 and FIX-02 fixed in state.lua, both xfails converted to passing checks with their Phase-1 assertion bytes audited intact
 
-Progress: [█████░░░░░] 50% of phase 2 (1 of 2 plans)
+Progress: [███░░░░░░░] 25% of phase 2 (1 of 2 plans)
 
 ## Performance Metrics
 
@@ -64,6 +64,7 @@ Progress: [█████░░░░░] 50% of phase 2 (1 of 2 plans)
 | Phase 01 P02 | 21min | 3 tasks | 1 files |
 | Phase 01 P03 | 16min | 3 tasks | 1 files |
 | Phase 02 P01 | 16min | 3 tasks | 2 files |
+| Phase 02 P02 | 22min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -90,6 +91,10 @@ Recent decisions affecting current work:
 - [Phase 2]: 02-01: points_partial is judged against awards actually witnessed, not against whether the count moved -- the count now moves on every ordinary phase transition
 - [Phase 2]: 02-01: restore()'s wall-clock gap is clamped at zero, so a saved_at stamped in the future is inert rather than generous (T-02-01)
 - [Phase 2]: 02-01: byte-identity of a converted xfail is proven by /tmp/inctrack-assert-integrity.py against baseline b8a19fa, with a negative control run before the verdict is trusted
+- [Phase 2]: The close plumbing was removed rather than the title bar restored -- the compact 1.1.0 layout is a shipped feature, and the ImGui stub has only the fourteen entry points ui.lua already uses
+- [Phase 2]: ui.render keeps returning opts.visible unconditionally; two untouchable Phase-1 assertions read that return value
+- [Phase 2]: A disjunctive red line is retired with a companion check pinning which branch the fix took, so the other branch cannot satisfy it later
+- [Phase 2]: The recorder's close switch stays although it can no longer fire: it is the subject of the FIX-03 regression check, not dead weight
 
 ### Pending Todos
 
@@ -113,6 +118,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-08-28T23:24:38.548Z
-Stopped at: Completed 02-01-PLAN.md
+Last session: 2026-08-28T23:38:40.651Z
+Stopped at: Completed 02-02-PLAN.md -- Phase 2 complete, zero known defects
 Resume file: None
