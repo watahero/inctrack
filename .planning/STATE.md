@@ -2,20 +2,20 @@
 gsd_state_version: 1.0
 milestone: v1.2.0
 milestone_name: correctness and cost
-current_phase: 1
-current_phase_name: The Net
-status: planning
-stopped_at: Completed 01-03-PLAN.md
-last_updated: "2026-08-28T21:48:41.571Z"
+current_phase: 2
+current_phase_name: The Three Defects
+status: executing
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-08-28T23:24:38.647Z"
 last_activity: 2026-08-29
-last_activity_desc: Roadmap created; 19 v1 requirements mapped across 4 phases
-state_head: 103c2f3aa954b4e07ca3aa9d14f19b451f4c6e78
+last_activity_desc: 02-01 complete: FIX-01 and FIX-02 fixed in state.lua; one xfail (FIX-03) remains
+state_head: e04936afa279e686082012d8b04b996426ae8504
 progress:
   total_phases: 4
-  completed_phases: 0
-  total_plans: 3
-  completed_plans: 3
-  percent: 0
+  completed_phases: 1
+  total_plans: 5
+  completed_plans: 4
+  percent: 25
 ---
 
 # Project State
@@ -25,16 +25,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-28)
 
 **Core value:** What the window shows is either true, or visibly marked as unconfirmed — never quietly wrong.
-**Current focus:** Phase 1 — The Net
+**Current focus:** Phase 2 — The Three Defects
 
 ## Current Position
 
-Phase: 1 of 4 (The Net)
-Plan: 3 of 3 in current phase
-Status: Ready for verification — all 3 plans of phase 1 complete
-Last activity: 2026-08-29 — 01-03 complete: addon shell suite (81 checks), FIX-01 and FIX-02 xfails, the exactly-three guard
+Phase: 2 of 4 (The Three Defects)
+Plan: 1 of 2 in current phase
+Status: 02-01 complete — 02-02 (FIX-03) is next
+Last activity: 2026-08-29 — 02-01 complete: FIX-01 and FIX-02 fixed in state.lua, both xfails converted to passing checks with their Phase-1 assertion bytes audited intact
 
-Progress: [██████████] 100% of phase 1 (3 of 3 plans)
+Progress: [█████░░░░░] 50% of phase 2 (1 of 2 plans)
 
 ## Performance Metrics
 
@@ -63,6 +63,7 @@ Progress: [██████████] 100% of phase 1 (3 of 3 plans)
 | Phase 01 P01 | 23min | 3 tasks | 2 files |
 | Phase 01 P02 | 21min | 3 tasks | 1 files |
 | Phase 01 P03 | 16min | 3 tasks | 1 files |
+| Phase 02 P01 | 16min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -85,6 +86,10 @@ Recent decisions affecting current work:
 - [Phase 1]: 01-03: the text_in pcall boundary is forced with a Lua table as e.message — a number coerces through the string metatable and the test would assert nothing
 - [Phase 1]: 01-03: FIX-01 and FIX-02 are written as deltas and tolerances, never absolute expected values, so Phase 2 flips all three xfails green without editing an assertion
 - [Phase 1]: 01-03: EXPECTED_XFAILS plus a main() guard summed across every suite; the guard's own output contains neither report marker, and it was proven by flipping the constant to 2 (exit 1)
+- [Phase 2]: 02-01: the phase line and the completion are the only authors of phases_cleared; the points handler advances a new awards_seen counter instead
+- [Phase 2]: 02-01: points_partial is judged against awards actually witnessed, not against whether the count moved -- the count now moves on every ordinary phase transition
+- [Phase 2]: 02-01: restore()'s wall-clock gap is clamped at zero, so a saved_at stamped in the future is inert rather than generous (T-02-01)
+- [Phase 2]: 02-01: byte-identity of a converted xfail is proven by /tmp/inctrack-assert-integrity.py against baseline b8a19fa, with a negative control run before the verdict is trusted
 
 ### Pending Todos
 
@@ -92,11 +97,11 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 2]: Suite 3 asserts `phases_cleared == number of points events`, which encodes the FIX-01 defect. Fixing FIX-01 makes suite 3 red until its independent recomputation is re-derived from boss kills. Expected, not a regression.
+- [Phase 2]: RESOLVED in 02-01. Suite 3's cross-check is re-derived from the raw log's highest `Phase #N` plus the completion (degenerate no-phase-line case reads 1), computed from `active` alone. All 888 verified runs pass; the check count did not move.
 - [All phases]: The deep suites need the author's private chatlogs and a local Ashita install. A green run without the `chatlogs:` header line is partial, not passing.
 - [Phase 1]: Stubs for ImGui and the Ashita host must live in `test/`, never in the addon — the purity boundary is what makes the suite reach the code at all.
 - [Phase 1]: the 12,841-check baseline is stale by 20. The full run now reports 12,821 from 127 logs; the UNMODIFIED pre-plan harness gives the identical per-suite counts on the same data, so this is chatlog input drift, not a regression. Hold per-suite counts constant rather than the sum. (01-02: the sum is now 12,874 — above the literal figure again — with all eight pre-existing per-suite counts unchanged. Keep reading the criterion as "no suite went down".)
-- [Phase 2]: all three expected failures must be flipped green WITHOUT editing their res.xfail conditions or messages; each fix must also decrement EXPECTED_XFAILS in the same commit or the guard fails the run. Locations: test/run_tests.py:654 (FIX-01), :707 (FIX-02), :1773 (FIX-03).
+- [Phase 2]: FIX-01 and FIX-02 are done (02-01) — both converted to `res.check` with their Phase-1 condition and message bytes proven identical by `/tmp/inctrack-assert-integrity.py` (source reproduced verbatim in 02-01-SUMMARY.md; add "FIX-03" to its `AUDITED` tuple in 02-02). One expected failure is left: FIX-03, in the ui suite. `EXPECTED_XFAILS` is 1 and `EXPECTED_DEFECTS` is `{"FIX-03"}`; 02-02's fix must update both in the same commit or the guard fails the run.
 
 ## Deferred Items
 
@@ -108,6 +113,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-08-28T21:48:26.020Z
-Stopped at: Completed 01-03-PLAN.md
+Last session: 2026-08-28T23:24:38.548Z
+Stopped at: Completed 02-01-PLAN.md
 Resume file: None
