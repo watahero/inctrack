@@ -88,7 +88,18 @@ Plans:
   4. In game: `/addon reload inctrack` mid-run leaves the instance clock agreeing with the next `You have N minutes remaining` line the server sends, instead of being optimistic by the downtime.
   5. No unreachable close affordance remains — either clicking a close control hides the window, or `grep` finds no `ARG_OPEN` plumbing in `ui.lua` and no `shown == false` branch in `inctrack.lua`.
 
-**Plans**: TBD (2 expected)
+**Plans**: 2 plans
+
+Plans:
+
+- [ ] 02-01-PLAN.md — FIX-01 and FIX-02 in `state.lua`: one author for the
+  cleared-phase count (the phase line, plus the completion closing the final
+  phase), and a `restore()` that ages `time_left`, elapsed and the bonus expiry
+  by the wall-clock gap `saved_at` already records
+- [ ] 02-02-PLAN.md — FIX-03 in `ui.lua` and `inctrack.lua`: the unreachable
+  close path removed, the six window snapshots re-pasted, the phase-closing
+  audit proving all four Phase-1 defect assertions unedited, and the in-game
+  reload check
 
 **Coverage note carried into planning:** suite 3 currently asserts
 `phases_cleared == number of points events`, an independent recomputation that
