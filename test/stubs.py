@@ -592,6 +592,12 @@ function string.strip_colors(s)
     return out;
 end
 
+-- require() returns two values from Lua 5.4 on (the module and its loader
+-- data). The harness wants the module and nothing else.
+function __host_require(name)
+    return (require(name));
+end
+
 -- string:args() -- inctrack.lua:229. '/inc reset' -> { '/inc', 'reset' },
 -- 1-indexed, so args[1] and args[2] behave as they do in game.
 function string.args(s)
@@ -931,7 +937,7 @@ class AshitaHost:
         return self.lua.globals()[name]
 
     def require(self, name):
-        return self.lua.globals()["require"](name)
+        return self.lua.globals()["__host_require"](name)
 
     @property
     def events(self):
@@ -980,7 +986,7 @@ class AshitaHost:
 
     @property
     def json(self):
-        return self.lua.globals()["require"]("json")
+        return self.require("json")
 
     def set_party_name(self, name):
         self.lua.globals()["__host_player"] = name or ""

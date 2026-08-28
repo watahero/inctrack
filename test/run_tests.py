@@ -27,6 +27,17 @@ Suites:
   6. disconnect         -- stale progress is never presented as current
   7. timers             -- countdown, linger, staleness
   8. persistence        -- json round trip                                  [libs]
+  9. ui                 -- pure helpers, and whole-window render snapshots
+ 10. addon shell        -- registration, text_in, settings, commands
+
+ui.lua and inctrack.lua are reached through stubbed hosts (test/stubs.py);
+make_host() builds an isolated runtime with both installed.
+
+A few assertions are recorded as expected failures with Result.xfail. An
+expected failure asserts the behaviour the addon is *supposed* to have; a
+known defect is why it is false today. They are counted like any other check,
+they print on their own XFAIL lines, and they never make the run exit
+non-zero. Phase 2 is where they go green.
 """
 
 import os
@@ -38,6 +49,11 @@ import lupa
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ADDON = os.path.join(os.path.dirname(HERE), "inctrack")
+
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+
+import stubs
 
 # Name used in the synthetic unit-test fixtures below. Unrelated to any real
 # character; the replay suites read the real name off the log filenames.
@@ -111,6 +127,121 @@ def new_state(lua, State, player=PLAYER):
     )
 
 
+# --------------------------------------------------------------------------
+# The stubbed host: ui.lua and inctrack.lua, outside the game
+# --------------------------------------------------------------------------
+
+# Walk upvalues transitively, following function-valued ones and remembering
+# what has been visited so a cycle cannot loop. _ENV is skipped: it is the
+# globals table, and returning it would let a caller mistake a global for one
+# of the file-scope locals this exists to reach.
+UPVALUE_CHUNK = """
+function __gsd_upvalues(fn)
+    local out, seen, queue = {}, {}, { fn };
+    local i = 1;
+    while i <= #queue do
+        local f = queue[i];
+        i = i + 1;
+        if not seen[f] then
+            seen[f] = true;
+            local n = 1;
+            while true do
+                local name, value = debug.getupvalue(f, n);
+                if name == nil then
+                    break;
+                end
+                if name ~= '_ENV' then
+                    out[name] = value;
+                    if type(value) == 'function' and not seen[value] then
+                        queue[#queue + 1] = value;
+                    end
+                end
+                n = n + 1;
+            end
+        end
+    end
+    return out;
+end
+"""
+
+
+class Host(stubs.AshitaHost):
+    """An isolated Ashita + ImGui host: one call, one whole addon.
+
+    A fresh lupa runtime per host, so each scenario gets clean module state --
+    ui.lua keeps short_cache and origin_x at file scope and inctrack.lua keeps
+    one incursion table, so a scenario that needs a pristine addon builds a new
+    host rather than juggling package.loaded. make_lua()'s shared runtime and
+    the eight suites that depend on it are left exactly as they are.
+
+    Adds to AshitaHost:
+      imgui  -- the ImGuiRecorder
+      addon  -- inctrack.lua's file-scope locals, by upvalue reflection
+    """
+
+    def __init__(self, player=PLAYER, profile=None):
+        lua = lupa.LuaRuntime()
+        lua.execute(
+            "package.path = [[%s\\?.lua;]] .. package.path" % ADDON.replace("\\", "\\\\")
+        )
+        lua.execute("__clock = 0")
+        lua.execute("function __clockfn() return __clock end")
+        self.imgui = stubs.install_imgui(lua)
+        stubs.AshitaHost.__init__(self, lua, player=player, profile=profile)
+
+    @property
+    def addon(self):
+        """The addon shell's file-scope locals: incursion, visible, reset,
+        persist, printf, now, MUST_SAVE and the rest.
+
+        Resolved lazily over every registered handler plus the profile-switch
+        callback, since between them they close over the whole shell.
+        """
+        names = {}
+        functions = list(self.events.values())
+        callback = self.profile_callback
+        if callback is not None:
+            functions.append(callback)
+        for fn in functions:
+            names.update(lua_locals(self, fn))
+        return names
+
+
+def make_host(player=PLAYER, profile=None):
+    """Build an isolated host with ui.lua's and inctrack.lua's hosts stubbed.
+
+    player  -- what AshitaCore reports as party member 0 ('' defers the fetch)
+    profile -- overrides merged over the addon's default settings on load
+    """
+    return Host(player=player, profile=profile)
+
+
+def lua_locals(host, fn):
+    """Every file-scope local reachable from `fn`, as a name -> value dict.
+
+    ui.lua and inctrack.lua declare their helpers as file-scope locals, so
+    nothing but ui.render and the registered handlers is reachable by name --
+    and the addon may not be edited to export them. Upvalue reflection is the
+    only way to unit-test them without changing the shipped code.
+
+    From ui.render this reaches the draw functions and, through them,
+    clock_str, right_text, wrapped, bar, urgency, replace_plain, shorten,
+    STAT_SHORT, COLOR, CONTENT_W and origin_x.
+    """
+    lua = host.lua
+    if lua.globals()["__gsd_upvalues"] is None:
+        available = lua.eval(
+            "type(debug) == 'table' and type(debug.getupvalue) == 'function'")
+        if not available:
+            raise RuntimeError(
+                "debug.getupvalue is unavailable in this lupa build; "
+                "ui.lua's and inctrack.lua's file-scope locals cannot be "
+                "reached without it")
+        lua.execute(UPVALUE_CHUNK)
+    found = lua.globals()["__gsd_upvalues"](fn)
+    return {k: v for k, v in found.items()}
+
+
 def clean(line):
     return TS.sub("", line.rstrip("\n").rstrip("\r")).strip()
 
@@ -145,33 +276,67 @@ def extra_of(state):
     return out
 
 
+# Report markers. Both literals are a contract, not a style choice: the phase
+# criteria and the defect suites count these lines in the run's output, so
+# nothing else the harness prints may contain either substring.
+XFAIL_MARK = "XFAIL "
+FIXED_MARK = "NOW PASSING "
+
+
 class Result:
     def __init__(self, title):
         self.title = title
         self.checks = 0
         self.failures = []
         self.notes = []
+        self.xfails = []
+        self.fixed = []
 
     def check(self, cond, msg):
         self.checks += 1
         if not cond:
             self.failures.append(msg)
 
+    def xfail(self, cond, msg):
+        """Assert behaviour the addon is *supposed* to have, knowing a defect
+        makes it false today.
+
+        Counts as a check like any other. A false condition is the expected
+        failure and lands in `xfails`; a condition that unexpectedly holds
+        means the defect is gone and lands in `fixed`, which is loud but does
+        not turn the run red either way. The message names the defect in the
+        user's terms, not the code's.
+        """
+        self.checks += 1
+        if cond:
+            self.fixed.append(msg)
+        else:
+            self.xfails.append(msg)
+
     def note(self, msg):
         self.notes.append(msg)
 
+    def status(self):
+        if self.failures:
+            return "FAILED (%d)" % len(self.failures)
+        if self.xfails:
+            return "ok (%d known defects)" % len(self.xfails)
+        return "ok"
+
     def report(self):
-        print(
-            "  %-44s %6d checks  %s"
-            % (self.title, self.checks,
-               "ok" if not self.failures else "FAILED (%d)" % len(self.failures))
-        )
+        print("  %-44s %6d checks  %s"
+              % (self.title, self.checks, self.status()))
         for n in self.notes:
             print("      %s" % n)
+        for x in self.xfails:
+            print("      %s%s" % (XFAIL_MARK, x))
+        for f in self.fixed:
+            print("      %s%s" % (FIXED_MARK, f))
         for f in self.failures[:10]:
             print("      FAIL %s" % f)
         if len(self.failures) > 10:
             print("      ... %d more" % (len(self.failures) - 10))
+        # An expected failure is not a failure: the process still exits 0.
         return not self.failures
 
 
