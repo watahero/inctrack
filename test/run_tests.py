@@ -494,6 +494,22 @@ def lua_locals(host, fn):
     return {k: v for k, v in found.items()}
 
 
+def table_entries(host, table):
+    """How many keys a Lua table actually holds, counted over pairs.
+
+    Counted from the table itself rather than read off a bookkeeping counter,
+    so a counter that has drifted from the thing it claims to describe is
+    caught rather than believed.
+    """
+    counter = getattr(host, "_gsd_entry_counter", None)
+    if counter is None:
+        counter = host.lua.eval(
+            "function (t) local n = 0; for _ in pairs(t) do n = n + 1 end; "
+            "return n end")
+        host._gsd_entry_counter = counter
+    return int(counter(table))
+
+
 def clean(line):
     return TS.sub("", line.rstrip("\n").rstrip("\r")).strip()
 
@@ -3237,6 +3253,85 @@ def test_ui():
               "drawn: %r then %r"
               % (once, shorten("Cure Potency+10 / Fast Cast+5")))
 
+    # --- and the memoisation stops growing (PERF-03) ---
+    #
+    # The cache above is keyed by server text, and the addon lives as long as
+    # the client does: nothing about a stat string is bounded by anything the
+    # addon controls. Past a stated cap the whole cache is dropped rather than
+    # one entry evicted -- boon stat strings are few and repeat every frame,
+    # so an LRU would be more code, on the render path, for no gain on real
+    # traffic.
+    cap_value = L.get("SHORT_CACHE_MAX")
+    short_cache = L.get("short_cache")
+    forget = ui["forget"]
+
+    res.check(cap_value is not None,
+              "shorten()'s memo cache has no stated bound, so it grows for as "
+              "long as the client is running")
+    res.check(forget is not None,
+              "ui.lua exports nothing the shell can call when the run the "
+              "cache was built for is gone, so a character's boon text stays "
+              "in memory until the client is closed")
+    if forget is None:
+        def forget():                                        # noqa: F811
+            return None
+
+    cap = int(cap_value) if cap_value is not None else 0
+
+    # Measured on the table, never on a counter: a bookkeeping number that has
+    # drifted from the cache would otherwise report a bound that is not there.
+    forget()
+    res.check(table_entries(host, short_cache) == 0,
+              "the cache did not start this case empty, so nothing counted "
+              "below is this case's doing")
+
+    evicted = "Accuracy+0 / Store TP+0"
+    peak, dropped, previous = 0, False, 0
+    for i in range(512):
+        shorten("Accuracy+%d / Store TP+%d" % (i, i))
+        held = table_entries(host, short_cache)
+        peak = max(peak, held)
+        if held < previous:
+            dropped = True
+        previous = held
+
+    res.check(cap > 0 and peak <= cap,
+              "the memo cache reached %d entries against a stated bound of "
+              "%d: keyed by server text, in a process that stays up for a "
+              "whole play session" % (peak, cap))
+    res.check(dropped,
+              "512 distinct stat strings never made the cache drop anything, "
+              "so the bound above passed on a cache that simply never filled")
+
+    # A drop costs memoisation. It may never cost correctness.
+    res.check(shorten(evicted) == "Acc+0 STP+0",
+              "a stat string the drop had evicted came back shortened "
+              "wrongly, so the bound is being paid for in what the window "
+              "shows: %r" % shorten(evicted))
+
+    # --- and it is cleared in place, not replaced ---
+    #
+    # ui.lua's file-scope locals are reachable only by upvalue reflection, so
+    # a helper that assigned a fresh table would leave the harness holding an
+    # orphan and measuring a cache the addon no longer uses. The handle is
+    # taken before the call and read after it, which is what makes the two
+    # checks below statements about the live cache.
+    handle = L["short_cache"]
+    shorten("Evasion+10 / Enmity-5")
+    res.check(table_entries(host, handle) > 0,
+              "nothing reached the cache, so emptying it below would prove "
+              "nothing")
+    forget()
+    res.check(table_entries(host, handle) == 0,
+              "the clearing helper replaced the cache table instead of "
+              "emptying it, so the handle the harness holds is an orphan and "
+              "what it measures is not the cache the addon is using")
+    shorten("Fast Cast+5")
+    res.check(table_entries(host, handle) == 1,
+              "the table the addon memoises into is not the one the harness "
+              "reads, so nothing above is a statement about the shipped cache")
+    forget()
+
     # --- bar, right_text and wrapped draw, so read the recorded calls ---
 
     rec.reset()
@@ -4114,6 +4209,45 @@ def test_addon_shell():
               "unlocking the window left it locked, so the hoisted table was "
               "written once and never again. Flags that reached Begin: %s"
               % ("|".join(free_flags) or "none"))
+
+    # --- the boon memo goes when the run does (PERF-03) -------------------
+    #
+    # Through the real command and the real profile callback, with a frame
+    # drawn first so there is something in the cache to lose. The cache is a
+    # file-scope local in ui.lua, reached the only way it can be reached.
+    caching = loaded_host()
+    cache_ui = caching.require("ui")
+    boon_cache = lua_locals(caching, cache_ui.render).get("short_cache")
+    res.check(boon_cache is not None,
+              "the boon shorthand cache is no longer reachable, so nothing "
+              "below is a statement about what the addon holds in memory")
+    caching.fire_text_in(begins())
+    caching.fire_text_in(SHELL_BOON)
+    caching.fire("d3d_present")
+    res.check(boon_cache is not None and table_entries(caching, boon_cache) > 0,
+              "the frame drew the boon row without memoising anything, so "
+              "the clearing checks below would pass on an empty cache")
+    caching.fire("command", command="/incursion reset")
+    res.check(boon_cache is not None
+              and table_entries(caching, boon_cache) == 0,
+              "the boon text of a run the player cleared is still held in "
+              "memory, and stays there for as long as the client is running")
+
+    swapping = loaded_host()
+    swap_ui = swapping.require("ui")
+    swap_cache = lua_locals(swapping, swap_ui.render).get("short_cache")
+    swapping.fire_text_in(begins())
+    swapping.fire_text_in(SHELL_BOON)
+    swapping.fire("d3d_present")
+    res.check(swap_cache is not None
+              and table_entries(swapping, swap_cache) > 0,
+              "the frame drew the boon row without memoising anything, so "
+              "the character-change check below would prove nothing")
+    swapping.switch_profile({"session": ""})
+    res.check(swap_cache is not None
+              and table_entries(swapping, swap_cache) == 0,
+              "one character's boon text was still in memory after they "
+              "logged out and another character logged in")
 
     # --- the resume round trip, through the stubbed json both ways --------
 
