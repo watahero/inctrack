@@ -28,7 +28,9 @@ fix_status:
   IN-02: not addressed -- Info, outside the critical+warning fix scope
   IN-03: not addressed -- Info; the review itself recommends no change this milestone
   IN-04: not addressed -- Info, outside the critical+warning fix scope
-  IN-05: not addressed -- Info, outside the critical+warning fix scope
+  IN-05: fixed 2026-08-29 (milestone audit G-1) -- re-decided as 'reject the
+    field, keep the run': a NaN or +/-infinity is read exactly as a missing key
+    would be, so the field is unknown and the rest of the run survives
 fix_commits:
   CR-01: e07126b
   WR-01: a11583e
@@ -482,12 +484,14 @@ The same applies to the profile-switch path at `inctrack/inctrack.lua:393-398`.
 
 ## Info
 
-**Status for IN-01 … IN-05: not addressed.** This fix pass was scoped to
+**Status for IN-01 … IN-04: not addressed.** This fix pass was scoped to
 critical and warning findings. IN-03 is additionally a case the review itself
-recommends leaving alone this milestone, and IN-05's suggested tightening is
-noted there as interacting with CR-01's proportionality problem — which the
-CR-01 fix above has now decided in the opposite direction, so it wants
-re-deciding rather than applying as written.
+recommends leaving alone this milestone.
+
+**IN-05 has since been re-decided and fixed** (2026-08-29, milestone audit
+G-1). It is the one finding this review left explicitly open pending a
+decision, and the decision is recorded below and in
+`.planning/v1.2.0-MILESTONE-AUDIT.md`.
 
 ### IN-01: `opt_table` is defined and never used
 
@@ -540,6 +544,40 @@ one of the three.
 justification (no data reaches any of them) once.
 
 ### IN-05: `opt_number` admits NaN and ±inf into the clock arithmetic
+
+**Status: FIXED** (2026-08-29, as milestone audit G-1) — but *not* as the fix
+below proposes, and the difference is the whole of the re-decision this finding
+asked for.
+
+The suggestion below is "fail the blob", and it notes correctly that this
+collides with CR-01's proportionality problem: refusing a live run over one bad
+field costs boons, points, phase and elapsed that the server never sends again.
+CR-01 settled that the validator answers *what shape is this*, never *is this
+informative*. Failing the blob would have reversed that a second time.
+
+What was decided instead is that a NaN is neither the right value nor a wrong
+shape — it is **no value at all**. There is nothing a NaN could be said to be.
+So it is read exactly as a **missing key** would be: `state.lua`'s new
+`finite()` turns a NaN or ±infinity into `nil` at each of the fifteen places
+`restore()` reads a number out of the blob, that one field comes back unknown,
+and the rest of the run comes back whole. Neither the run refused nor the
+number kept.
+
+That keeps CR-01's rule intact — the validator still never judges whether a
+number is informative — while closing the core-value breach the audit
+demonstrated, where a restored session drew
+`~-9223372036854775808:-9223372036854775808:-9223372036854775808` as the
+instance clock. A blank string and a NaN are the same case except in what they
+draw: a blank draws nothing, so the run keeps it; a NaN draws garbage, so the
+field goes and the run stays.
+
+Pinned by 117 checks across the state, ui and persistence suites (the last
+driving `1e999` through Ashita's own `json.lua`, which decodes it to `+inf` on
+both dialects). Negative-controlled four ways on both backends: neutering
+`finite()` turns 92 checks red on Lua 5.5 and 94 on LuaJIT 2.1, and dropping the
+NaN, the ±infinity and the −infinity clauses individually turns 31/32, 61/62 and
+29/29 red.
+
 
 **File:** `inctrack/state.lua:654`, consumed at `inctrack/state.lua:820`,
 `889-895`

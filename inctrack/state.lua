@@ -657,6 +657,53 @@ local function opt_boolean(v) return v == nil or type(v) == 'boolean'; end
 local function opt_table(v)   return v == nil or type(v) == 'table';   end
 
 --[[
+* The right shape, carrying no value: NaN and +/-infinity.
+*
+* opt_number above answers 'is this the right shape', and these are: they are
+* of type 'number', and every rule in this file passes them. But there is
+* nothing either of them could be said to *be* -- no minute, no kill count, no
+* save stamp -- and arithmetic spreads them instead of stopping on them. A
+* save stamp of NaN makes both the instance clock and the elapsed counter NaN,
+* and the window then draws
+*
+*     ~-9223372036854775808:-9223372036854775808:-9223372036854775808
+*
+* where the clock belongs under LuaJIT, which is the dialect Ashita embeds,
+* and raises out of string.format under Lua 5.3 and later. A fabricated number
+* drawn beside real ones is the worst outcome this addon recognises.
+*
+* So a non-finite number is read exactly as a missing key would be: that one
+* field reads as unknown, and everything else in the run comes back intact.
+*
+* Absent rather than fatal, deliberately. Review finding CR-01 settled that
+* this validator never judges whether a value is *informative*, because
+* refusing a blob costs a live run's boons, points, phase and elapsed and the
+* server re-announces none of it. Dropping one field is not that judgement:
+* it is the narrower one that there is no number here to keep. The parallel
+* with a blank string is exact except in what it draws -- a blank name is the
+* right shape carrying nothing and draws nothing, while a NaN is the right
+* shape carrying nothing and draws garbage -- so the field goes rather than
+* the run.
+*
+* Reachable: '1e999' is well-formed JSON, the settings file is one a player
+* can hand-edit, and Ashita's own json.lua decodes it to +infinity on both
+* dialects. NaN is one subtraction away from that, and tonumber('nan') is a
+* real NaN under LuaJIT.
+*
+* Written the long way because it is the one form that means the same thing in
+* both dialects: 'v ~= v' is true of NaN alone, and each infinity is equal to
+* math.huge or its negation. tostring() is not usable for this -- Lua 5.5 on
+* Windows prints '-nan(ind)' where LuaJIT prints 'nan' -- and neither is any
+* integer test, since LuaJIT has no integer subtype at all.
+]]--
+local function finite(v)
+    if type(v) ~= 'number' or v ~= v or v == math.huge or v == -math.huge then
+        return nil;
+    end
+    return v;
+end
+
+--[[
 * Shape, never content.
 *
 * Every string field below is checked for *being* a string and never for
@@ -836,6 +883,16 @@ function State:restore(data)
         return false;
     end
 
+    -- Every number the blob carries is read through finite() from here down,
+    -- so NaN and +/-infinity arrive as nil and are handled by the same arms
+    -- that already handle an absent field. The four that reach arithmetic
+    -- before the run is built are taken once, here, so the gap, the staleness
+    -- rule and the clock all read the same value.
+    local saved_at  = finite(data.saved_at);
+    local time_left = finite(data.time_left);
+    local elapsed   = finite(data.elapsed);
+    local phase     = finite(data.phase);
+
     -- How long we were gone. Wall clock is the only source that survives
     -- process death: the injected monotonic clock restarts from zero with the
     -- addon, so the stamp written at save time is the only record of the gap.
@@ -845,14 +902,14 @@ function State:restore(data)
     -- reads as no gap, which is also what exempts such a blob from the
     -- staleness rule below, exactly as before.
     local gap = 0;
-    if data.saved_at then
-        gap = os.time() - data.saved_at;
+    if saved_at then
+        gap = os.time() - saved_at;
         if gap < 0 then
             gap = 0;
         end
     end
 
-    if data.saved_at and gap > STALE_SECONDS then
+    if saved_at and gap > STALE_SECONDS then
         return false;
     end
 
@@ -870,16 +927,16 @@ function State:restore(data)
     -- countdown floors at zero, so the saved value can be up to a minute
     -- short of the truth. Erring towards resuming keeps a run that might
     -- still be live rather than discarding one that is.
-    if data.time_left and gap > data.time_left + 60 then
+    if time_left and gap > time_left + 60 then
         return false;
     end
 
     local now = self:now();
     local run = new_run(self, data.instance, data.difficulty);
 
-    run.phase          = data.phase;
-    run.kills_cur      = data.kills_cur or 0;
-    run.kills_max      = data.kills_max;
+    run.phase          = phase;
+    run.kills_cur      = finite(data.kills_cur) or 0;
+    run.kills_max      = finite(data.kills_max);
     -- Copied field by field rather than adopted whole. The decoded blob is a
     -- table the addon does not own -- the caller keeps a handle on it and can
     -- change it afterwards -- and adopting it by reference is what review
@@ -892,7 +949,7 @@ function State:restore(data)
             name  = o.name,
             loc   = o.loc,
             text  = o.text,
-            count = o.count,
+            count = finite(o.count),
             stale = o.stale,
         };
         if o.mobs then
@@ -908,7 +965,7 @@ function State:restore(data)
         run.next_boss = { name = data.next_boss.name, loc = data.next_boss.loc };
     end
 
-    run.points         = data.points or 0;
+    run.points         = finite(data.points) or 0;
     if data.version == 1 then
         -- A blob written by 1.1.0. Its 'phases_cleared' was authored by every
         -- points award -- bonus payouts and chests included -- and then raised
@@ -925,22 +982,22 @@ function State:restore(data)
         -- points lower-bound marking for the rest of the run. Starting at
         -- zero marks rather than hides, which is the only safe direction.
         run.awards_seen    = 0;
-        run.phases_cleared = data.phase and (data.phase - 1) or 0;
+        run.phases_cleared = phase and (phase - 1) or 0;
     else
-        run.awards_seen    = data.awards_seen or 0;
-        run.phases_cleared = data.phases_cleared or 0;
+        run.awards_seen    = finite(data.awards_seen) or 0;
+        run.phases_cleared = finite(data.phases_cleared) or 0;
     end
     run.points_partial = data.points_partial or false;
     -- The gap counts as run time: the instance kept going without us.
-    run.started        = now - (data.elapsed or 0) - gap;
+    run.started        = now - (elapsed or 0) - gap;
     run.recovered      = true;
 
     -- We were not listening between the save and now, so treat everything
     -- restored as a lower bound until the server tells us otherwise.
     run.desynced       = true;
 
-    if data.time_left then
-        run.time_left = data.time_left - gap;
+    if time_left then
+        run.time_left = time_left - gap;
         if run.time_left < 0 then
             run.time_left = 0;
         end
@@ -948,18 +1005,19 @@ function State:restore(data)
     end
 
     if data.bonus then
+        local remaining = finite(data.bonus.remaining);
         run.bonus = {
             kind  = data.bonus.kind,
             label = data.bonus.label,
             loc   = data.bonus.loc,
-            cur   = data.bonus.cur or 0,
-            max   = data.bonus.max,
+            cur   = finite(data.bonus.cur) or 0,
+            max   = finite(data.bonus.max),
             done  = data.bonus.done or false,
             -- No special case for a bonus that ran out while we were gone: a
             -- negative result puts the expiry in the past, and State:bonus()
             -- already drops a not-done bonus past its expiry. That keeps the
             -- record in place, so a later progress line can still revive it.
-            expires_at = data.bonus.remaining and (now + data.bonus.remaining - gap) or nil,
+            expires_at = remaining and (now + remaining - gap) or nil,
         };
     end
 
@@ -977,8 +1035,8 @@ function State:restore(data)
     if data.extra then
         for labelText, entry in pairs(data.extra) do
             run.extra[labelText] = {
-                label = entry.label or labelText, cur = entry.cur,
-                max = entry.max, done = entry.done or false, at = now,
+                label = entry.label or labelText, cur = finite(entry.cur),
+                max = finite(entry.max), done = entry.done or false, at = now,
             };
         end
     end

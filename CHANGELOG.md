@@ -26,6 +26,10 @@ instead, and the cost paid on every chat line cut.
   was blank was dropped; both now read correctly.
 - A saved run in a shape this build does not recognise is discarded whole and
   said out loud, rather than half-applied in silence.
+- A number in a saved run that is not really a number — which a corrupted or
+  hand-edited settings file can hold — no longer reaches the window. That one
+  field reads as unknown and the rest of the run comes back as it was; before,
+  it could put a row of nonsense digits where the clock belongs.
 - Clearing a run no longer lets its instance timer leak into the next one.
 - A chat line the addon does not care about is now turned away before anything
   is built for it: no copy of the line, no colour stripping, no pattern run.

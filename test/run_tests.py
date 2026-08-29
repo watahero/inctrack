@@ -588,6 +588,51 @@ def at(path, text, lineno=None):
     return "%s:%d  %s" % (path, lineno, ascii(text))
 
 
+# Every path in a decoded or restored table holding a number that is not a
+# value. Written in Lua rather than walked from Python because the crossing
+# back into Python is what a test like this must not depend on -- and because
+# the three idioms below are the ones state.lua's own finite() uses, so a
+# dialect that disagreed with them would fail the addon and the check together.
+# tostring() is deliberately absent: Lua 5.5 on Windows prints '-nan(ind)'
+# where LuaJIT prints 'nan'.
+NONFINITE_CHUNK = """
+function __gsd_nonfinite(t, prefix, out, seen)
+    out = out or {}; seen = seen or {}; prefix = prefix or '';
+    if seen[t] then return out end
+    seen[t] = true;
+    for k, v in pairs(t) do
+        local path = prefix .. tostring(k);
+        if type(v) == 'number' then
+            if v ~= v or v == math.huge or v == -math.huge then
+                out[#out + 1] = path;
+            end
+        elseif type(v) == 'table' then
+            __gsd_nonfinite(v, path .. '.', out, seen);
+        end
+    end
+    return out;
+end
+function __gsd_nonfinite_list(t)
+    local out = __gsd_nonfinite(t);
+    table.sort(out);
+    return table.concat(out, ', ');
+end
+"""
+
+
+def nonfinite_fields(lua, table):
+    """Where a table holds NaN or +/-infinity, as one comma-separated string.
+
+    Empty when it holds neither, so a check reads as `not nonfinite_fields(...)`
+    and its failure message names the field without a second walk.
+    """
+    if table is None:
+        return ""
+    if lua.globals()["__gsd_nonfinite_list"] is None:
+        lua.execute(NONFINITE_CHUNK)
+    return lua.globals().__gsd_nonfinite_list(table)
+
+
 def feed(state, parser, lines):
     for line in lines:
         ev = parser.parse(line)
@@ -1702,6 +1747,277 @@ def test_state_units(lua, parser, State):
               "a run whose 'Begins!' line named no instance was thrown away "
               "on reload, taking its points and boons with it")
 
+
+    # --- IN-05 / audit G-1: a number that is not a value -------------------
+    #
+    # opt_number answers 'is this the right shape', and NaN and +/-infinity
+    # are: type(v) == 'number' is true of all three, and every other rule in
+    # the validator passes them. Nothing they could be said to *be* is,
+    # though -- no minute, no kill count, no save stamp -- and arithmetic
+    # spreads them rather than stopping on them, so one anywhere in the blob
+    # reaches the window. Driven against the shipped modules, a restored run
+    # drew
+    #
+    #     ~-9223372036854775808:-9223372036854775808:-9223372036854775808
+    #
+    # where the instance clock belongs, under LuaJIT, which is the dialect
+    # Ashita embeds; under Lua 5.3 and later the same value raises out of
+    # string.format instead, so the window goes dark.
+    #
+    # The rule is that a non-finite number reads exactly as a missing key
+    # would: that one field is unknown, everything else comes back. Not the
+    # whole run refused -- that is the harm CR-01 above exists to prevent, and
+    # it costs boons, points, phase and elapsed the server never sends again.
+    # Not the number kept either -- that is the core value inverted.
+    #
+    # Reachable rather than contrived: '1e999' is well-formed JSON and the
+    # settings file is one a player can hand-edit. The persistence suite
+    # drives that literal through Ashita's own decoder.
+
+    # The three values are made in Python and cross into Lua through lupa. If
+    # that crossing stopped preserving them -- a NaN arriving as a string, an
+    # infinity clamped to a float maximum -- every case below would pass for
+    # the wrong reason, so it is checked first, in Lua, with the same idioms
+    # state.lua uses, on whichever backend this run is against. Those idioms
+    # mean the same thing in both dialects; tostring() does not, which is why
+    # nothing here reads one (Lua 5.5 on Windows prints '-nan(ind)' where
+    # LuaJIT prints 'nan'), and neither does any integer test, since LuaJIT
+    # has no integer subtype.
+    lua.execute(
+        "function __gsd_nf(v) return type(v) == 'number', v ~= v, "
+        "v == math.huge, v == -math.huge end")
+    nf = lua.globals().__gsd_nf
+
+    NONFINITE = [
+        ("NaN",       float("nan"),  (True, True,  False, False)),
+        ("+infinity", float("inf"),  (True, False, True,  False)),
+        ("-infinity", float("-inf"), (True, False, False, True)),
+    ]
+    for what, value, want in NONFINITE:
+        got = tuple(bool(x) for x in nf(value))
+        res.check(got == want,
+                  "%s does not reach Lua as itself on this backend, so every "
+                  "case below proves nothing: (number, v~=v, v==huge, "
+                  "v==-huge) read %r, expected %r" % (what, got, want))
+
+    # nonfinite_fields sweeps the whole restored record, so a value that
+    # slipped past the field the case names is still caught. Nothing in the
+    # run may be non-finite once restore() has returned, and that assertion --
+    # unlike the per-field expectations below -- does not have to be kept in
+    # step with any list.
+
+    def restore_with(path, value):
+        """A known-good blob with one field replaced, restored.
+
+        Returns (raised, took, state, run).
+        """
+        s = new_state(lua, State)
+        raised = None
+        took = False
+        try:
+            took = bool(s.restore(s, broken(path, value)))
+        except Exception as exc:                    # noqa: BLE001
+            raised = exc
+        return raised, took, s, s.snapshot(s)
+
+    # What the fixture holds, so 'the rest came back intact' is stated once
+    # rather than per case. The entry for the field a case is breaking is
+    # skipped -- that field has its own expectation below.
+    def rest_intact(run, skip):
+        def read(*keys):
+            v = run
+            for k in keys:
+                if v is None:
+                    return None
+                v = v[k]
+            return v
+
+        def count(*keys):
+            t = read(*keys)
+            return None if t is None else len(list(t.values()))
+
+        checks = (
+            ("instance",              lambda: read("instance") == "Fort Ghelsba"),
+            ("difficulty",            lambda: read("difficulty") == "Normal"),
+            ("phase",                 lambda: int(read("phase")) == 2),
+            ("kills_cur",             lambda: int(read("kills_cur")) == 13),
+            ("kills_max",             lambda: int(read("kills_max")) == 20),
+            ("points",                lambda: int(read("points")) == 84),
+            ("awards_seen",           lambda: int(read("awards_seen")) == 1),
+            ("phases_cleared",        lambda: int(read("phases_cleared")) == 1),
+            ("objective.count",       lambda: int(read("objective", "count")) == 20),
+            ("objective.mobs",        lambda: count("objective", "mobs") == 3),
+            ("next_boss",             lambda: read("next_boss", "name") == "Orcish Martial"),
+            ("bonus.cur",             lambda: int(read("bonus", "cur")) == 2),
+            ("bonus.max",             lambda: int(read("bonus", "max")) == 5),
+            ("extra.Seals Broken.cur",
+             lambda: int(read("extra", "Seals Broken", "cur")) == 2),
+            ("extra.Seals Broken.max",
+             lambda: int(read("extra", "Seals Broken", "max")) == 6),
+            ("boons",                 lambda: count("boons") == 2),
+        )
+        lost = []
+        for name, test in checks:
+            if name == skip or run is None:
+                continue
+            try:
+                ok = bool(test())
+            except Exception:                       # noqa: BLE001
+                ok = False
+            if not ok:
+                lost.append(name)
+        return lost
+
+    def same_number(got, want):
+        if want is None:
+            return got is None
+        return got is not None and float(got) == float(want)
+
+    def field(*keys):
+        def read(s, run):
+            v = run
+            for k in keys:
+                if v is None:
+                    return None
+                v = v[k]
+            return v
+        return read
+
+    # Every field opt_number guards, and what the run holds for it once the
+    # value is read as absent. Each of these is also what an absent key gives,
+    # which is the whole of the rule.
+    ABSENT_CASES = [
+        ("phase", "the phase number", field("phase"), None),
+        ("kills_cur", "the kill count", field("kills_cur"), 0),
+        ("kills_max", "the kill cap", field("kills_max"), None),
+        ("points", "the points total", field("points"), 0),
+        ("awards_seen", "the award count", field("awards_seen"), 0),
+        ("phases_cleared", "the cleared-phase count", field("phases_cleared"), 0),
+        ("objective.count", "the objective's own count",
+         field("objective", "count"), None),
+        ("bonus.cur", "the bonus progress", field("bonus", "cur"), 0),
+        ("bonus.max", "the bonus target", field("bonus", "max"), None),
+        ("bonus.remaining", "the bonus countdown",
+         lambda s, run: s.bonus_remaining(s), None),
+        ("extra.Seals Broken.cur", "an extra counter's progress",
+         field("extra", "Seals Broken", "cur"), None),
+        ("extra.Seals Broken.max", "an extra counter's target",
+         field("extra", "Seals Broken", "max"), None),
+        ("time_left", "the instance clock",
+         lambda s, run: s.time_left(s), None),
+    ]
+
+    for path, what, reader, absent in ABSENT_CASES:
+        for name, value, _ in NONFINITE:
+            raised, took, s_nf, run_nf = restore_with(path, value)
+            leftover = nonfinite_fields(lua, run_nf)
+            lost = rest_intact(run_nf, path)
+            if raised is not None:
+                why = ("restore() raised (%s) -- in game that escapes into an "
+                       "Ashita event handler with no protected call around it"
+                       % raised)
+            elif not took:
+                why = ("the whole run was thrown away over one field, costing "
+                       "the boons, points, phase and elapsed the server never "
+                       "sends again")
+            elif run_nf is None:
+                why = "it was taken and no run was left behind"
+            elif leftover:
+                why = ("%s came back holding %s, which the window formats into "
+                       "a number the server never sent" % (name, leftover))
+            elif lost:
+                why = ("the run came back short of %s, which %s had nothing to "
+                       "do with" % (", ".join(lost), what))
+            else:
+                why = ""
+            res.check(raised is None and took and run_nf is not None
+                      and not leftover and not lost,
+                      "a saved session whose %s was %s did not come back as a "
+                      "run with that one field unknown and the rest intact: %s"
+                      % (what, name, why))
+
+            got = reader(s_nf, run_nf) if run_nf is not None else None
+            res.check(same_number(got, absent),
+                      "a %s of %s read back as %r rather than as unknown (%r) "
+                      "-- a value that is not a number was kept and drawn"
+                      % (what, name, got, absent))
+
+    # The two fields the clock is built from are checked against a control
+    # rather than a literal: both are derived from wall time, and a second can
+    # tick between the two restores. Same rule, stated as 'the same run the
+    # blob without that key gives'.
+    for path, what in (("elapsed", "the elapsed counter"),
+                       ("saved_at", "the save stamp")):
+        _, ctl_took, ctl_state, ctl_run = restore_with(path, None)
+        res.check(ctl_took and ctl_run is not None,
+                  "a saved session with no %s was refused, so the cases below "
+                  "have no control to be compared against" % path)
+        ctl_elapsed = float(ctl_state.elapsed(ctl_state)) if ctl_took else None
+        for name, value, _ in NONFINITE:
+            raised, took, s_nf, run_nf = restore_with(path, value)
+            leftover = nonfinite_fields(lua, run_nf)
+            lost = rest_intact(run_nf, path)
+            res.check(raised is None and took and run_nf is not None
+                      and not leftover and not lost,
+                      "a saved session whose %s was %s did not come back as a "
+                      "run with that one field unknown and the rest intact: %s"
+                      % (what, name,
+                         raised if raised is not None
+                         else ("refused" if not took
+                               else (leftover or ", ".join(lost)
+                                     or "no run was left"))))
+            if not took or ctl_elapsed is None:
+                continue
+            got = float(s_nf.elapsed(s_nf))
+            res.check(abs(got - ctl_elapsed) <= 1,
+                      "a %s of %s put the elapsed counter at %r, where the "
+                      "same blob without that key puts it at %r -- the window "
+                      "is counting from a number the server never sent"
+                      % (what, name, got, ctl_elapsed))
+
+    # And the whole shape at once: every numeric field non-finite together.
+    # This is the case where each field's fallback has to hold with no other
+    # field left to lean on, and it is the one a hand-edited file most
+    # plausibly produces -- an editor that wrote '1e999' once wrote it
+    # everywhere.
+    all_broken = shape_blob()
+    for path in [c[0] for c in ABSENT_CASES] + ["elapsed", "saved_at"]:
+        target = all_broken
+        steps = path.split(".")
+        for step in steps[:-1]:
+            target = target[int(step) if step.isdigit() else step]
+        target[steps[-1]] = float("inf")
+    s_all = new_state(lua, State)
+    all_raised = None
+    all_took = False
+    try:
+        all_took = bool(s_all.restore(s_all, all_broken))
+    except Exception as exc:                        # noqa: BLE001
+        all_raised = exc
+    all_run = s_all.snapshot(s_all)
+    res.check(all_raised is None and all_took and all_run is not None,
+              "a saved session whose every number was +infinity was not "
+              "resumed at all, so the names, the mob list and the boons the "
+              "server did send went with them: %s"
+              % (all_raised if all_raised is not None else "refused"))
+    res.check(not nonfinite_fields(lua, all_run),
+              "a run restored from an all-infinity blob still holds %s"
+              % (nonfinite_fields(lua, all_run) or "nothing",))
+    res.check(all_run is not None
+              and all_run["instance"] == "Fort Ghelsba"
+              and all_run["next_boss"] is not None
+              and all_run["next_boss"]["name"] == "Orcish Martial"
+              and len(list(all_run["objective"]["mobs"].values())) == 3
+              and len(list(all_run["boons"].values())) == 2,
+              "an all-infinity blob came back without the instance, boss, "
+              "mobs and boons it also held -- every one of them a string the "
+              "numbers had nothing to do with")
+    res.check(all_run is not None and s_all.time_left(s_all) is None
+              and s_all.bonus_remaining(s_all) is None,
+              "an all-infinity blob came back with a clock: time left %r, "
+              "bonus countdown %r"
+              % (s_all.time_left(s_all) if all_run is not None else None,
+                 s_all.bonus_remaining(s_all) if all_run is not None else None))
 
     # A rejection leaves the run the player is actually in alone. It is
     # neither replaced by a half-built one nor cleared.
@@ -2894,6 +3210,67 @@ def test_json_roundtrip(lua, parser, State, libs):
                  holed_raised if holed_raised is not None
                  else ("accepted" if holed_took else "a run was left")))
 
+    # --- IN-05 / audit G-1, through Ashita's own decoder -------------------
+    #
+    # '1e999' is a well-formed JSON number that no double can hold, and
+    # json.lua answers it with +infinity -- on both dialects, checked below
+    # rather than assumed. That is the whole of the reachability argument: the
+    # settings file is one a player can hand-edit, and the harness's own stub
+    # cannot settle what the real decoder does with an overflowing literal.
+    #
+    # An infinity is the right *shape* and no value at all, so it reads as a
+    # missing key: that field is unknown and the rest of the run survives.
+    # Refusing the blob instead would cost the boons, points, phase and
+    # elapsed the server never re-announces, which is the harm CR-01 above
+    # exists to prevent; keeping the number would put
+    # '~-9223372036854775808:...' where the instance clock belongs.
+    over = js.decode('{"version":2,"instance":"Davoi","difficulty":"Hard",'
+                     '"phase":3,"kills_cur":4,"kills_max":1e999,'
+                     '"time_left":1e999,"elapsed":-1e999,'
+                     '"boons":[{"name":"A","stats":"x"}],"extra":{}}')
+    res.check(nonfinite_fields(lua, over) != "",
+              "json.lua no longer decodes '1e999' to an infinity, so this "
+              "case no longer stands for the shape it was written for")
+    res.check(sorted(nonfinite_fields(lua, over).split(", "))
+              == ["elapsed", "kills_max", "time_left"],
+              "the decoder put an infinity somewhere other than the three "
+              "fields this case writes one into: %r"
+              % (nonfinite_fields(lua, over),))
+
+    s12 = new_state(lua, State)
+    over_raised = None
+    over_took = False
+    try:
+        over_took = bool(s12.restore(s12, over))
+    except Exception as exc:                        # noqa: BLE001
+        over_raised = exc
+    over_run = s12.snapshot(s12)
+    res.check(over_raised is None and over_took and over_run is not None,
+              "a hand-edited session carrying '1e999' was not resumed, so "
+              "three unreadable numbers cost the player the instance, the "
+              "phase, the kills and the boon the same file also named: %s"
+              % (over_raised if over_raised is not None
+                 else ("refused" if not over_took else "no run was left")))
+    res.check(not nonfinite_fields(lua, over_run),
+              "a run restored from a '1e999' file still holds %s, which the "
+              "window formats into a number the server never sent"
+              % (nonfinite_fields(lua, over_run) or "nothing",))
+    res.check(over_run is not None
+              and over_run["instance"] == "Davoi"
+              and over_run["difficulty"] == "Hard"
+              and int(over_run["phase"]) == 3
+              and int(over_run["kills_cur"]) == 4
+              and len(list(over_run["boons"].values())) == 1,
+              "a run restored from a '1e999' file came back without the "
+              "instance, phase, kill count and boon the unreadable numbers "
+              "had nothing to do with")
+    res.check(over_run is not None and over_run["kills_max"] is None
+              and s12.time_left(s12) is None,
+              "an unreadable kill cap or clock was kept rather than read as "
+              "unknown: cap %r, clock %r"
+              % (over_run["kills_max"] if over_run is not None else None,
+                 s12.time_left(s12) if over_run is not None else None))
+
     # The other half of the same rule, and the reason it is contiguity and
     # not length: serialise() always writes 'boons' and 'extra', json.lua
     # encodes an empty table as '[]', and a run one minute old has both. If
@@ -3684,6 +4061,97 @@ def test_ui():
             res.check(flag in got_flags,
                       "%s never reached the host: the flags Begin actually "
                       "received are %s" % (flag, "|".join(got_flags) or "none"))
+
+    # --- IN-05 / audit G-1: what a restored non-finite number draws --------
+    #
+    # The state suite settles what restore() keeps. This settles the half that
+    # matters on screen, because the harm was never the value in the record --
+    # it was the window drawing it with the same confidence as a real one. The
+    # audit drove exactly this path and watched the header row draw
+    #
+    #     TextColored '~-9223372036854775808:-9223372036854775808:...'
+    #
+    # under LuaJIT, with right_text silently skipping its SetCursorPosX so the
+    # rest of the line lost its alignment too. Under Lua 5.3 and later the
+    # same value raises out of string.format, which HARD-01 contains by
+    # disabling the window -- so on the shipped dialect the player reads a
+    # fabricated clock, and on this harness's default they lose the window.
+    #
+    # Both dialects are covered by one assertion here: the frame must not
+    # raise, and the clock must read as unknown.
+    #
+    # The two cases differ in what 'unknown' looks like, and deliberately so.
+    # An unreadable time_left leaves the addon with no clock at all, which the
+    # window already has a mark for. An unreadable saved_at leaves it with a
+    # clock and no idea how long it was away -- which is exactly what a blob
+    # with no stamp at all leaves it with, and restore() has always read that
+    # as no gap. The saved minutes are then still the server's own number,
+    # drawn under the '~' that says they are an estimate and beside the
+    # 'reconnected - awaiting update' line that says the run is a lower bound.
+    for label, field, value, want_clock in (
+            ("infinite", "time_left", float("inf"),
+             "TextColored dim '--:--'"),
+            ("NaN", "saved_at", float("nan"),
+             "TextColored text '~1:30:00'")):
+        nf_host = make_host()
+        nf_parser = nf_host.require("parser")
+        NfState = nf_host.require("state")
+        nf_ui = nf_host.require("ui")
+        nf_color = lua_locals(nf_host, nf_ui.render)["COLOR"]
+
+        nf_host.tick(0)
+        source = new_state(nf_host.lua, NfState)
+        feed(source, nf_parser, mid_phase)
+        blob = source.serialise(source)
+        blob[field] = value
+
+        target = new_state(nf_host.lua, NfState)
+        res.check(bool(target.restore(target, blob)),
+                  "a saved run whose %s was %s was refused outright, so the "
+                  "window has nothing to draw and the player has lost the "
+                  "run" % (field, label))
+
+        nf_host.imgui.reset()
+        nf_raised = None
+        try:
+            nf_ui.render(target,
+                         nf_host.lua.table_from({"visible": True,
+                                                 "locked": False}))
+        except Exception as exc:                    # noqa: BLE001
+            nf_raised = exc
+        res.check(nf_raised is None,
+                  "drawing a run restored from a %s %s raised inside "
+                  "d3d_present (%s) -- the window is disabled for the rest of "
+                  "the session and the player is told to type /incursion"
+                  % (label, field, nf_raised))
+        if nf_raised is not None:
+            continue
+
+        nf_balance = nf_host.imgui.balance()
+        res.check(all(v == 0 for v in nf_balance.values()),
+                  "the frame that drew a %s %s left the ImGui stack "
+                  "unbalanced: %r" % (label, field, nf_balance))
+
+        drawn = nf_host.imgui.snapshot(colors=nf_color, measurements=False)
+        # Checked case-insensitively and against the value LuaJIT's %d prints
+        # for a non-finite double, because the two dialects spell these
+        # differently -- '-nan(ind)' against 'nan' -- and neither spelling is
+        # a thing the player should ever read.
+        garbage = [token for token in ("nan", "inf", "9223372036854775808")
+                   if token in drawn.lower()]
+        res.check(not garbage,
+                  "the window drew %s on a run restored from a %s %s -- a "
+                  "number the server never sent, beside numbers it did"
+                  % (", ".join(garbage), label, field))
+        res.check(want_clock in drawn,
+                  "the instance clock did not read %r on a run restored from "
+                  "a %s %s; the header drew: %s"
+                  % (want_clock, label, field,
+                     "; ".join(line.strip() for line in drawn.splitlines()[3:9])))
+        res.check("TextColored warn 'reconnected - awaiting update'" in drawn,
+                  "a run restored from a %s %s dropped the desync warning, so "
+                  "the window presents what it kept as confirmed"
+                  % (label, field))
 
     # No clock to reset at the end of this suite: every case above builds and
     # discards its own host, so nothing it advanced is shared with any other

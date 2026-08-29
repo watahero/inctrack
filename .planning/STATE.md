@@ -151,7 +151,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 | Category | Item | Status | Deferred At | Milestone |
 |----------|------|--------|-------------|-----------|
-| Behaviour | IN-05 — `opt_number` admits NaN and ±inf; a restored session can render `~-9223372036854775808:...` as the instance clock. `03-REVIEW.md` says it "wants re-deciding rather than applying as written" and no re-decision was recorded. **The only open gap that touches behaviour.** | Open — needs a decision | Phase 3 | v1.2.0 |
+| Behaviour | IN-05 / audit G-1 — `opt_number` admitted NaN and ±inf, so a restored session could render `~-9223372036854775808:...` as the instance clock. **Decided 2026-08-29: reject the field, keep the run** — a non-finite number is read exactly as a missing key would be, so that one field is unknown and the rest of the restored run survives whole. `state.lua` `finite()`; argued there and in `docs/design.md`; 117 checks across the state, ui and persistence suites; four negative controls on both dialects. | **Closed 2026-08-29** | Phase 3 | v1.2.0 |
 | Coverage | PERF-01's timestamp-loop gate has no test; removing it leaves the suite green | Open | Phase 4 | v1.2.0 |
 | Process | PROC-01…04 — CI, luacheck, a versioned release artifact, a public chatlog fixture | Deliberately v2 | Phase 1 scope decision | v1.2.0 |
 | Review | 29 Info-severity findings across the four phase reviews, none Critical or Warning | Open by design | Phases 1-4 | v1.2.0 |

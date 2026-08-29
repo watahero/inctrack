@@ -346,6 +346,33 @@ and blobs written by shipped 1.1.0, which `restore()` still accepts by version,
 can carry a blank boon name or a blank mob. What still fails is a field of the
 wrong *type*: nil where a name belongs, a number, a nested table.
 
+There is one number that is the right shape and no value at all: **NaN and
+±infinity**. `type(v) == 'number'` is true of all three, so every rule above
+passes them, but there is nothing any of them could be said to *be* — no minute,
+no kill count, no save stamp — and arithmetic spreads them rather than stopping
+on them. A save stamp of NaN makes both the instance clock and the elapsed
+counter NaN, and the header row then draws
+`~-9223372036854775808:-9223372036854775808:-9223372036854775808` under LuaJIT,
+the dialect Ashita embeds, or raises out of `string.format` under Lua 5.3 and
+later. So each of them is read **exactly as a missing key would be**: that one
+field is unknown and the rest of the run comes back intact. That is not the
+validator judging whether a value is informative — the rule it does not enforce,
+above — it is the narrower judgement that there is no number there to keep, and
+dropping one field rather than the run is what keeps the cost proportionate.
+Reachable: `1e999` is well-formed JSON, the settings file is one a player can
+hand-edit, and Ashita's own `json.lua` decodes it to `+inf` on both backends.
+Detection is written as `v ~= v or v == math.huge or v == -math.huge`, which is
+the one form that means the same thing in both dialects — `tostring` is not, since
+Lua 5.5 on Windows prints `-nan(ind)` where LuaJIT prints `nan`, and no integer
+test is, since LuaJIT has no integer subtype.
+
+One residual, pre-existing and unchanged by that rule: when a kill cap is absent
+and the objective carries no count either, the phase bar's label reads
+`cur/0` — a denominator the server never sent — with an empty bar. It is the
+same thing an absent `kills_max` has always drawn, and a restored run is
+unconditionally desynced, so the label carries its ` ?` marker; but the `0` is
+the one place an unknown number is drawn as a number rather than left off.
+
 Lists are checked key by key **and** for contiguity from 1. Every loop that reads
 one is driven by `#`, and `#` on a table with a hole is unspecified — keys
 `{1, 3}` can answer 1, so a three-boon list would come back holding one boon with
