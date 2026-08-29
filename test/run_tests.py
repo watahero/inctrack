@@ -34,6 +34,15 @@ Suites:
 ui.lua and inctrack.lua are reached through stubbed hosts (test/stubs.py);
 make_host() builds an isolated runtime with both installed.
 
+The write policy suite 10 asserts, since the addon stopped writing to disk
+on the chat thread: text_in decides whether a write is owed -- immediately
+for an event the server never repeats, otherwise once every five seconds --
+and marks it; d3d_present performs it, above both of its early returns, so a
+hidden or latched-off window still writes the run down; and the unload
+handler writes unconditionally, without consulting the mark, because it is
+the one path that cannot wait for a frame. So every save is asserted twice:
+nothing on the line that delivered it, then written on the next frame.
+
 Three assertions were recorded as expected failures with Result.xfail, one per
 confirmed defect this milestone exists to fix. An expected failure asserts the
 behaviour the addon is *supposed* to have; the defect was why it was false.
