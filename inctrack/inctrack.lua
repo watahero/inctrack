@@ -214,6 +214,16 @@ ashita.events.register('text_in', 'incursion_text_in', function (e)
             return;
         end
 
+        -- Could this be ours at all? Asked here, on the raw message, because
+        -- strip_colors is this handler's own call: no reordering inside
+        -- parser.lua can decline to make it, so this is the only place the
+        -- allocation is actually avoidable. A line carrying a colour code is
+        -- never turned away here -- the gate declines to judge one, since a
+        -- code can sit inside the very text it searches for.
+        if not parser.relevant(line) then
+            return;
+        end
+
         -- Colour codes would defeat the anchored patterns.
         line = line:strip_colors();
 

@@ -336,6 +336,82 @@ local generic = {
     end,
 };
 
+-- The byte a timestamped line starts with, resolved once rather than written
+-- as a number at the one place it is compared.
+local LBRACKET = ('['):byte();
+
+--[[
+* Could this line possibly be ours?
+*
+* Asked before anything is allocated for the line -- before strip_colors in
+* the shell and before trim below -- because the chat handler runs on every
+* line the client receives, forever, and over 127 real logs 97.5% of them are
+* not ours. string.find with plain = true returns indices and never builds a
+* string, so a 'no' here costs seven searches over a short string and nothing
+* else. The number of searches is fixed and does not depend on the input.
+*
+* Two rules, in this order.
+*
+* 1. A line carrying a colour-code marker byte gets an unconditional yes.
+*    This runs on the *raw* message, and Ashita's colour codes are a marker
+*    byte plus one arbitrary payload byte that can land anywhere -- including
+*    between two characters of one of the needles below, which would make
+*    every plain search for that needle answer no on a line the server really
+*    did send. A line with a code in it is a line this function is not
+*    entitled to judge, so it declines to. That line then costs exactly what
+*    it cost before this function existed, and never more. Two plain searches
+*    rather than one character class: this is the branch every line pays, and
+*    a plain search is the one shape that visibly cannot allocate or backtrack.
+*
+* 2. Otherwise, yes when the line holds any one of the literal substrings the
+*    matchers require. Each needle is a literal the corresponding matcher's
+*    own pattern cannot match without -- under *every* alternation and *every*
+*    optional group in it, not merely under the shape of the example line
+*    above that matcher. Two are worth naming:
+*
+*    - 'remaining inside this Incursion' begins after the optional plural in
+*      'You have (%d+) minutes? remaining...', because at the one-minute
+*      warning the server sends 'You have 1 minute remaining inside this
+*      Incursion.' A needle carrying the plural would answer no, the shell
+*      would return before strip_colors, and the instance clock would stop at
+*      the moment the player most needs it -- silently, since a dropped line
+*      looks exactly like a quiet stretch of chat. That is the only place in
+*      this file where a covering needle would otherwise land inside an
+*      optional region: the three Bonus Objective expiry forms carry a
+*      'Minutes?' as well, but their needle is the 'Bonus Objective: ' prefix,
+*      which sits at the head of the line, clear of it.
+*
+*    - 'gains the effect of ' is the loosest of the seven and admits every
+*      ordinary buff line as well as every boon, because a boon carries no
+*      'Incursion [', 'New Objective: ' or '(Boss: ' anchor to be told apart
+*      by. Those lines pay one wasted colour strip and are then turned away by
+*      the anchored rejection below, which is the right side to be wrong on.
+*
+* Deliberately looser than that anchored rejection, and deliberately in front
+* of it rather than in place of it: this one runs on unnormalised text and may
+* only ever produce false *positives*, which cost one wasted colour strip. The
+* anchored rejection goes on doing the precise half of the job, on text that
+* has been trimmed and destamped.
+*
+* No type guard, deliberately. The shell's pcall boundary has caught a
+* non-string message since 1.0.0 by letting the handler's first string method
+* call raise; a guard here would turn that into a silent early return.
+* parser.parse keeps its own, unchanged.
+]]--
+function parser.relevant(line)
+    if line:find('\30', 1, true) or line:find('\31', 1, true) then
+        return true;
+    end
+
+    return (line:find('Incursion [', 1, true)
+        or line:find('New Objective: ', 1, true)
+        or line:find('Bonus Objective: ', 1, true)
+        or line:find('(Boss: ', 1, true)
+        or line:find('remaining inside this Incursion', 1, true)
+        or line:find('incursion points.', 1, true)
+        or line:find('gains the effect of ', 1, true)) ~= nil;
+end
+
 --[[
 * Parse a single chat line.
 *
@@ -346,17 +422,31 @@ function parser.parse(line)
         return nil;
     end
 
+    -- The same question the shell asks before it allocates, asked again here
+    -- so this module is safe called standalone -- by the test harness, and by
+    -- anything that reaches parse without going through the chat handler.
+    if not parser.relevant(line) then
+        return nil;
+    end
+
     local s = trim(line);
 
     -- A timestamp plugin may have prepended '[HH:MM:SS] ' (the chatlogs show
     -- doubled stamps, so one is active in this setup). Every pattern here is
     -- ^-anchored, so strip any number of them or nothing else matches.
-    while true do
-        local rest, n = s:gsub('^%[%d%d:%d%d:%d%d%]%s+', '', 1);
-        if n == 0 then
-            break;
+    --
+    -- Only for a line that starts with '[': the loop is a gsub, and an
+    -- allocation, for a prefix almost no line carries. The pattern it runs is
+    -- ^-anchored itself, so a line beginning with any other byte cannot match
+    -- it and the loop's whole cost is the one gsub that finds nothing.
+    if s:byte(1) == LBRACKET then
+        while true do
+            local rest, n = s:gsub('^%[%d%d:%d%d:%d%d%]%s+', '', 1);
+            if n == 0 then
+                break;
+            end
+            s = rest;
         end
-        s = rest;
     end
 
     if s == '' then
