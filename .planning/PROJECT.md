@@ -104,6 +104,16 @@ backed by a test that goes red when the change is reverted:
 - ✓ The boon shorthand memo cache is bounded at 64, dropped whole when it fills, and emptied on reset and on a character switch (PERF-03) — v1.2.0
 - ✓ `docs/design.md` describes the addon that ships, `CHANGELOG.md` and `addon.version` both read 1.2.0, and the two are pinned to each other in both directions by the harness reading each out of its real source (DOC-01, DOC-02) — v1.2.0
 
+Delivered by **v1.2.1 — the persistence path**. A patch release, no new
+behaviour, fixing what the post-milestone codebase remap found. Each fix had a
+test that was red before it and green after, and each was negative-controlled by
+reverting the fix and watching the new check go red again:
+
+- ✓ A run the host's `json.encode` refuses no longer destroys the last good save. `persist()` writes the empty string only when there is no run, writes the blob when there is one, and on a raise writes nothing at all and hands the failure to the caller — which keeps what is owed, retries behind the five-second window and reports once. The harness gained the encode fault it never had, so the branch that used to blank the session is exercised rather than reasoned about (D-01) — v1.2.1
+- ✓ `/incursion reset` cannot resurrect the run it cleared. Its write is protected and, on failure, re-arms `save_due` so a frame retries the clear — the ordering half, not just the protection: with the `pcall` in and the re-arm out, five checks stay red including a fresh load resuming the run that was thrown away (D-02) — v1.2.1
+- ✓ The load and unload writes no longer raise into Ashita's event dispatch. The load handler's clear of an unusable blob is re-armed like every other write; the unload handler is contained and reports what was lost, past the report-once latch, because it is the one write with no frame left to retry it on and a sentence promising a retry would be false (D-04) — v1.2.1
+- ✓ `State.dirty` — twenty writes, no readers, never cleared — is gone, and the rule that removed it is derived rather than remembered: the `record:` suite fails on any field `state.lua` assigns and nothing reads (D-03) — v1.2.1
+
 One further outcome, raised by the milestone audit rather than by a requirement:
 
 - ✓ A number in a saved run that is not really a number — NaN or ±infinity, which a hand-edited or corrupted settings file can hold and which Ashita's own `json.lua` decodes from well-formed JSON — is read exactly as a missing key would be. That one field is unknown; the instance, boss, mobs, boons and every other number come back whole. 117 checks, negative-controlled four ways on both dialects (audit G-1) — v1.2.0

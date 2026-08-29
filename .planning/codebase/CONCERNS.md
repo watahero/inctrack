@@ -10,11 +10,18 @@ Each entry is marked **[DEFECT]** — visible in the code as written — or **[R
 contingent on input, host or sequence. The known-open items carried forward from the
 v1.2.0 milestone are listed separately at the end and are **not** findings.
 
+**v1.2.1 (2026-08-29)** closed the three defects and one of the risks, all of them on
+the persistence path: the encode failure that destroyed the last good save, `reset()`'s
+resurrection ordering, the vestigial `State.dirty`, and the unprotected load and unload
+writes. Those entries are kept below, marked **RESOLVED**, with what was done. Line
+numbers in every remaining entry are as of v1.2.0 and have shifted; the searchable text
+has not.
+
 ---
 
 ## Tech Debt
 
-### [DEFECT] `State.dirty` is written twenty-one times and read zero times
+### [DEFECT] [RESOLVED 1.2.1] `State.dirty` is written twenty-one times and read zero times
 
 - Files: `inctrack/state.lua:41` (init), `:94`, `:140`, `:161`, `:241`, `:251`, `:263`,
   `:274`, `:281`, `:295`, `:317`, `:330`, `:341`, `:357`, `:363`, `:370`, `:393`,
@@ -32,6 +39,10 @@ v1.2.0 milestone are listed separately at the end and are **not** findings.
 - Fix approach: delete the field, or clear it in a `State:take_dirty()` and route the
   frame handler's `save_due` through it. Deleting is the smaller change and matches what
   the shell actually does.
+- **Resolved in 1.2.1** by deleting it — twenty assignments and the initialiser. The
+  rule is now derived rather than remembered: the `record:` suite walks every `self.X`
+  assigned in `state.lua` and fails on any that nothing reads, so the next vestigial
+  field is caught when it is written rather than at the next audit.
 
 ### [RISK] Complexity has become its own risk
 
@@ -48,7 +59,8 @@ v1.2.0 milestone are listed separately at the end and are **not** findings.
   higher than the change deserves, and that reviewers start skimming prose that is
   carrying real constraints. The three items below (`persist()`'s silent blanking,
   `reset()`'s ordering, `dirty`) all sit inside heavily-commented regions and were not
-  caught by the prose.
+  caught by the prose. All three are fixed in 1.2.1; the point about the prose stands,
+  and 1.2.1 added a little more of it.
 - Fix approach: consider moving the validator's rationale (`state.lua:629-739`,
   `:759-786`) into `docs/design.md` and leaving a one-line pointer, and likewise the
   deferred-write essay. This is a documentation-placement change, not a code change, and
@@ -73,7 +85,7 @@ v1.2.0 milestone are listed separately at the end and are **not** findings.
 
 ## Known Bugs
 
-### [DEFECT] A failed `json.encode` silently destroys the last good saved run
+### [DEFECT] [RESOLVED 1.2.1] A failed `json.encode` silently destroys the last good saved run
 
 - Files: `inctrack/inctrack.lua:139-144`.
 - Symptoms: `persist()` reads
@@ -105,8 +117,14 @@ v1.2.0 milestone are listed separately at the end and are **not** findings.
   `settings.save()`, and route the report through the existing `save_told` latch. Blank
   the session only in the one case that means it — `blob == nil`, i.e. there is no run.
   Two branches instead of one ternary.
+- **Resolved in 1.2.1** as described. `persist()` now has three outcomes rather than one
+  ternary — no run writes `''`, an encoded run writes the blob, and a raise writes
+  nothing and is re-raised to the caller, which is already the machinery that keeps what
+  is owed, retries behind the five-second window and reports once. The harness gained the
+  encode fault it never had (`test/stubs.py`, `__host_encode_fault`), so the branch that
+  used to blank the session is now exercised rather than merely reasoned about.
 
-### [DEFECT] `reset()` can resurrect the run it cleared, if the disk write fails
+### [DEFECT] [RESOLVED 1.2.1] `reset()` can resurrect the run it cleared, if the disk write fails
 
 - Files: `inctrack/inctrack.lua:146-173`, specifically `:159` (`save_due = false`) and
   `:168-169` (`session = ''; settings.save()`).
@@ -125,8 +143,13 @@ v1.2.0 milestone are listed separately at the end and are **not** findings.
 - Fix approach: on a failed save inside `reset()`, re-arm `save_due = true` so the frame
   handler retries the clear, and report through `save_told`. Same shape as the frame
   handler already uses.
+- **Resolved in 1.2.1** as described, and the ordering half was negative-controlled: with
+  the `pcall` in place and the re-arm removed, five checks stay red, the resurrection
+  among them. The three things a failed write is owed — keep it, bound the retry, say so
+  once — are now one `save_failed()` shared by the frame handler, `reset()` and the load
+  handler, rather than a copy per caller.
 
-### [RISK] The unload and load handlers still write to disk unprotected
+### [RISK] [RESOLVED 1.2.1] The unload and load handlers still write to disk unprotected
 
 - Files: `inctrack/inctrack.lua:259` (`persist()` in the unload handler),
   `inctrack/inctrack.lua:245` (`settings.save()` in the load handler).
@@ -144,6 +167,14 @@ v1.2.0 milestone are listed separately at the end and are **not** findings.
 - Fix approach: `pcall(persist)` in the unload handler. There is nothing useful to do
   with the failure at unload time beyond reporting it, but the raise itself should not
   escape.
+- **Resolved in 1.2.1.** The load handler's clear goes through `save_failed()` like every
+  other write — frames follow a load, so there is somewhere to retry, and dropping it left
+  the unusable blob on disk to be met again on the next load. The unload handler is
+  `pcall`ed and reports; the ceiling is stated in the code rather than dressed up, because
+  there is no frame left to retry on. Its report is deliberately made *past* `save_told`:
+  everything that latch suppresses is a fault that will be tried again, and this one will
+  not, so it is a different sentence — 'anything since the last write is lost' — and
+  unload fires once, so it cannot become noise.
 
 ---
 
@@ -296,6 +327,10 @@ v1.2.0 milestone are listed separately at the end and are **not** findings.
   disk faults again" — and then immediately performs the unprotected `settings.save()` at
   `:169` that, on a persistent fault, is the very call most likely to raise. The clearing
   and the raise are two lines apart, and the raise escapes before anything can report it.
+  **That half is fixed in 1.2.1**: the save is protected and its failure goes through the
+  shared `save_failed()`, so the latch that was just cleared is what reports it. The
+  duplication this entry is actually about is unchanged — the *reporting* was factored,
+  the *clearing* was not, and the profile-switch callback still keeps its own copy.
 - Safe modification: factor the clearing into one `clear_session_latches()` called from
   both `reset()` and the profile-switch callback, leaving `render_ok` explicitly outside
   it with the existing comment. Do not fold `/incursion` bare into it — that path
@@ -308,11 +343,15 @@ v1.2.0 milestone are listed separately at the end and are **not** findings.
   the one accepted data-loss window in the design and it is invisible in the code itself.
   A minimised, alt-tabbed or background-throttled client stretches the unwritten interval
   arbitrarily; a client killed in that interval loses everything since the last frame that
-  ran, not one event. Orderly exits are covered by the unload handler — which is itself
-  unprotected, see above, so the two concerns compound: the mitigation for the deferral is
-  the one write with no retry and no protection behind it.
-- Test coverage: the deferral and the retry are covered; the compound case (a client that
-  stops presenting *and then* fails its unload write) is not, and probably cannot be.
+  ran, not one event. Orderly exits are covered by the unload handler — which was itself
+  unprotected until 1.2.1, so the two concerns compounded: the mitigation for the deferral
+  was the one write with no retry and no protection behind it. It is protected now. It
+  still has no retry, and it cannot have one.
+- Test coverage: the deferral and the retry are covered, and since 1.2.1 so is an unload
+  write that fails — the raise is contained and the loss is reported. The compound case (a
+  client that stops presenting *and then* fails its unload write) is not covered, and
+  probably cannot be; nothing can recover it either, which is the honest ceiling on this
+  path.
 
 ---
 
@@ -338,8 +377,9 @@ content; reachable from a hand-edited blob, since `array_of(data.boons, valid_bo
 
 **Ashita `imgui` binding** — known-open, see below.
 
-**Ashita `json`** — see the security entry. No vendored copy, no enumerable failure modes,
-and the one code path that reacts to its failure reacts destructively (`inctrack.lua:142`).
+**Ashita `json`** — see the security entry. No vendored copy and no enumerable failure
+modes; what changed in 1.2.1 is only the reaction, which no longer destroys the last good
+save. The dependency is exactly as opaque as it was.
 
 **`lupa` / Lua backends in the harness** — `test/stubs.py:29-45` already documents that the
 module-level `lupa.lua_type` answers `None` for LuaJIT-built proxies and dispatches around
@@ -357,17 +397,15 @@ negative fixtures in `test/run_tests.py` returns nothing relevant. Risk: the `%d
 formats in `ui.lua` consume all of these. **Priority: high** — this is the cheapest
 of the gaps to close and the one attached to a live finding.
 
-**`persist()`'s encode-failure branch** — `inctrack.lua:141-142`.
-The harness can inject a *save* fault (`test/stubs.py`, `__host_save_fault`) but there
-is no corresponding encode fault, so the branch that blanks the session has never been
-executed. Risk: the destructive path is unexercised. **Priority: high.**
+**~~`persist()`'s encode-failure branch~~** — **closed in 1.2.1.** `test/stubs.py` gained
+`__host_encode_fault`, in the same shape as the save fault, and the addon suite points it
+at a run already on disk.
 
-**`reset()` with a failing save** — `inctrack.lua:168-169`.
-The save-fault injector exists; it has not been pointed at the reset path. Would catch
-both the escaping raise and the resurrection ordering. **Priority: high.**
+**~~`reset()` with a failing save~~** — **closed in 1.2.1.** Both halves are covered: the
+raise that escaped the command handler, and the resurrection on the next load.
 
-**Unload handler with a failing save** — `inctrack.lua:259`. Same injector, same
-omission. **Priority: medium.**
+**~~Unload handler with a failing save~~** — **closed in 1.2.1**, along with the load
+handler's clear, which this list did not name.
 
 **Profile-switch callback invoked with nil** — `inctrack.lua:625`, `:660`. Requires a
 small extension to `__host_switch` in `test/stubs.py`. **Priority: medium.**
@@ -400,11 +438,12 @@ the reason is structural in each case, not an omission:
 
 These are the honest limit of what has been proven.
 
-**`settings.save()` is unprotected on the command path** — in `reset()`
-(`inctrack.lua:169`), the command handler (`:598`, `:606`) and the profile-switch callback
-(`:660`). Same fault class as the frame-handler fix. *(The ordering consequence inside
-`reset()`, and the separate unload/load-path exposure, are recorded as findings above;
-the bare lack of protection on these three is the known-open item.)*
+**`settings.save()` is unprotected on the command path** — in the `lock` and `auto`
+subcommands (`inctrack.lua:710`, `:718` as of 1.2.1) and the profile-switch callback
+(`:772`). Same fault class as the frame-handler fix. `reset()` left this list in 1.2.1,
+along with the load and unload writes recorded as findings above; these three are what
+remains, and none of them writes a run — two toggle a setting the player just changed,
+and the third belongs to a character that has already gone.
 
 **`Phase  13/0`** — with `kills_max` and `objective.count` both absent, the phase bar's
 label at `inctrack/ui.lua:231-233` prints a denominator the server never sent.
