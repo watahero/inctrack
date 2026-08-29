@@ -1672,6 +1672,71 @@ def test_timers(lua, parser, State):
     res.check(b is not None and int(b["cur"]) == 4,
               "a live progress message did not revive the bonus")
 
+    # --- HARD-06: a held timer sync does not survive a reset ---------------
+
+    # The hold exists to bridge the few seconds between the server's
+    # remaining-minutes line and the 'Begins!' that follows it. A reset is the
+    # player declaring the run over, and a sync captured before that moment
+    # describes an instance they are no longer in. The two cases below are
+    # written adjacent on purpose: they are one statement, not two, and the
+    # fix is only right if both hold.
+
+    tick(0)
+    s7 = new_state(lua, State)
+    feed(s7, parser, ["You have 90 minutes remaining inside this Incursion."])
+    s7.reset(s7)
+    res.check(s7["pending_time"] is None,
+              "a reset left the last remaining-minutes line held, so it is "
+              "still waiting to seed a run the player has not entered yet")
+
+    feed(s7, parser, ["Incursion [Fort Ghelsba] Begins! (Normal)"])
+    res.check(s7.time_left(s7) is None,
+              "a run begun straight after a reset came up showing a clock "
+              "left over from the run the player had just cleared: %r"
+              % (s7.time_left(s7),))
+    res.check(s7.snapshot(s7)["time_sync"] is None,
+              "a run begun straight after a reset carried the old run's sync "
+              "time, so its clock will start counting down from a number the "
+              "server never gave it")
+
+    # The pin in the other direction. Without the reset the very same
+    # sequence must still adopt the sync -- that is what the hold is for, and
+    # a fix that took it away would leave every run's clock blank for the
+    # first ten minutes.
+    tick(0)
+    s8 = new_state(lua, State)
+    feed(s8, parser, [
+        "You have 90 minutes remaining inside this Incursion.",
+        "Incursion [Fort Ghelsba] Begins! (Normal)",
+    ])
+    kept_sync = s8.time_left(s8)
+    res.check(kept_sync is not None and int(kept_sync) == 90 * 60,
+              "the entry sync stopped seeding a new run's clock, so the "
+              "window says nothing about time left until the first phase "
+              "boundary ten minutes in: %r" % (kept_sync,))
+
+    # The thirty-second staleness guard at 'begin' is a different rule -- how
+    # old a sync may be, not whether the player threw the run away -- and it
+    # is untouched, with and without a reset.
+    tick(0)
+    s9 = new_state(lua, State)
+    feed(s9, parser, ["You have 90 minutes remaining inside this Incursion."])
+    tick(31)
+    feed(s9, parser, ["Incursion [Fort Ghelsba] Begins! (Normal)"])
+    res.check(s9.time_left(s9) is None,
+              "a remaining-minutes line from over thirty seconds ago seeded a "
+              "new run's clock")
+
+    tick(0)
+    s10 = new_state(lua, State)
+    feed(s10, parser, ["You have 90 minutes remaining inside this Incursion."])
+    tick(31)
+    s10.reset(s10)
+    feed(s10, parser, ["Incursion [Fort Ghelsba] Begins! (Normal)"])
+    res.check(s10.time_left(s10) is None,
+              "a stale remaining-minutes line seeded a new run's clock after "
+              "a reset")
+
     tick(0)
     return res
 
@@ -2937,6 +3002,26 @@ def test_addon_shell():
     res.check(inc["override"] is None,
               "clearing the run left a manual show/hide from the old run in "
               "place")
+
+    # HARD-06, through the path the phase's success criterion actually names:
+    # the player types /incursion reset, not State:reset(). The server sends
+    # the remaining-minutes line just before 'Begins!', so a reset in between
+    # is exactly the window in which a held sync could leak into a run it
+    # never belonged to.
+    swept = loaded_host()
+    swept.fire_text_in("You have 90 minutes remaining inside this Incursion.")
+    swept.fire("command", command="/incursion reset")
+    swept.fire_text_in(begins())
+    swept_state = shell_state(swept)
+    swept_left = swept_state.time_left(swept_state)
+    res.check(swept_left is None,
+              "/incursion reset then a new run: the window came up already "
+              "counting down from the cleared run's clock (%r seconds left) "
+              "instead of blank" % (swept_left,))
+    swept_run = shell_run(swept)
+    res.check(swept_run is not None and swept_run["time_sync"] is None,
+              "a run begun after /incursion reset carried the cleared run's "
+              "sync time")
 
     # --- lock and auto, both ways -------------------------------------------
 
