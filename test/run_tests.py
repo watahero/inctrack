@@ -3859,32 +3859,64 @@ def test_addon_shell():
               "%d gsubs), so either the loop runs for both or it runs for "
               "neither" % (stamp_cost, plain_cost))
 
-    # --- the MUST_SAVE policy, driven by the injected clock ---------------
-
-    # The only thing standing between a mid-run reload and a blank window for
-    # a whole phase. Events the server never repeats are written the moment
-    # they land; kill counts arrive constantly and ride a five-second throttle.
+    # --- the write policy: decided here, written from the frame (PERF-02) --
+    #
+    # persist() serialises the run, encodes it as JSON and calls
+    # settings.save() -- disk I/O -- and until this phase all of that ran
+    # inside text_in, on the game thread, on the line that triggered it: every
+    # boon, every objective, every boss hint, every phase boundary, in the
+    # middle of combat chat.
+    #
+    # The *decision* has not moved and is unchanged: an event the server never
+    # repeats is owed a write the moment it lands, a kill count rides the
+    # five-second throttle. Only the write moved, onto the frame handler that
+    # already runs sixty times a second. So every site below is asserted
+    # twice -- nothing written yet, then written after one frame -- because
+    # 'fewer writes on the chat thread' is not the claim. Zero is.
     saver = loaded_host()
     res.check(saver.saves == 0,
               "loading with nothing saved still wrote to disk")
 
     saver.fire_text_in(begins())
+    res.check(saver.saves == 0,
+              "the start of a run went to disk on the chat thread, on the "
+              "line that delivered it -- a synchronous write in the middle of "
+              "combat chat (%d writes)" % saver.saves)
+    saver.fire("d3d_present")
     res.check(saver.saves == 1,
-              "the start of a run was not written down immediately (%d writes)"
+              "the start of a run was never written down at all, so a reload "
+              "a moment later comes back blank (%d writes)" % saver.saves)
+
+    # The flag is consumed, not sampled.
+    saver.fire("d3d_present")
+    res.check(saver.saves == 1,
+              "an idle frame with nothing new wrote the run again, so the "
+              "addon touches the disk sixty times a second (%d writes)"
               % saver.saves)
 
+    # The policy the player experiences, measured across frames rather than on
+    # the line, so what is asserted is the policy and not the disk.
     saver.fire_text_in(phase_line(1, 3))
+    saver.fire("d3d_present")
     res.check(saver.saves == 1,
-              "a kill count arriving a moment later forced a second disk "
-              "write (%d writes)" % saver.saves)
+              "a kill count arriving a moment after a saved event still "
+              "earned its own disk write (%d writes)" % saver.saves)
 
     saver.tick(6.0)
     saver.fire_text_in(phase_line(1, 3))
+    res.check(saver.saves == 1,
+              "a kill count past the throttle window was written on the chat "
+              "thread instead of on the next frame (%d writes)" % saver.saves)
+    saver.fire("d3d_present")
     res.check(saver.saves == 2,
-              "a kill count past the throttle window was not written down "
+              "a kill count past the throttle window was never written down "
               "(%d writes)" % saver.saves)
 
     saver.fire_text_in(SHELL_BOON)
+    res.check(saver.saves == 2,
+              "a boon went to disk on the chat thread, on the line that "
+              "delivered it (%d writes)" % saver.saves)
+    saver.fire("d3d_present")
     res.check(saver.saves == 3,
               "a boon -- which the server never announces again -- was left "
               "unwritten because a kill count had just been saved (%d writes)"
@@ -3895,17 +3927,161 @@ def test_addon_shell():
               "back blank")
     blob = saver.json.decode(saver.sessions[-1])
     res.check(blob is not None and blob["instance"] == SHELL_INSTANCE,
-              "what was written down does not name the instance the player is "
+              "what the frame wrote does not name the instance the player is "
               "standing in: %r" % (saver.sessions[-1],))
 
-    # --- unloading mid-run keeps the run ----------------------------------
+    # --- the flush runs on frames that draw nothing (PERF-02) -------------
+    #
+    # d3d_present returns early twice: once when the window latched itself off
+    # after a render error, and again when it is simply not on screen. A
+    # player running with automatic show/hide off is still playing the run,
+    # and so is one whose window latched off -- so a flush below either return
+    # would mean their run is never written down at all. That is the single
+    # easiest way to get this deferral wrong, so both returns are pinned.
+    hidden_run = loaded_host()
+    hidden_run.settings["auto"] = False
+    hidden_run.fire_text_in(begins())
+    hidden_run.fire_text_in(SHELL_MOBS)
+    res.check(hidden_run.addon["visible"]() is False,
+              "the fixture is not actually hiding the window, so the check "
+              "below would pass with the flush sitting under the visibility "
+              "return and would prove nothing")
+    saves_before = hidden_run.saves
+    hidden_run.fire("d3d_present")
+    res.check(hidden_run.saves == saves_before + 1,
+              "a player with automatic show/hide off never has their run "
+              "written down: the window is off screen, the frame returned "
+              "before the flush, and the whole Incursion is lost on a reload")
+    res.check(hidden_run.sessions[-1] != "",
+              "the frame that drew no window wrote an empty run over the "
+              "Incursion in progress")
 
-    before = saver.saves
-    saver.fire("unload")
-    res.check(saver.saves == before + 1,
-              "unloading mid-run did not write the run down")
-    res.check(saver.settings["session"] != "",
+    latched = loaded_host()
+    latched.fire_text_in(begins())
+    latched.fire("d3d_present")
+    latched.addon["incursion"]["render_off"] = True
+    latched.fire_text_in(SHELL_MOBS)
+    saves_before = latched.saves
+    latched.fire("d3d_present")
+    res.check(latched.saves == saves_before + 1,
+              "a window that switched itself off after a render error stopped "
+              "writing the run down too, so one render fault quietly became a "
+              "lost Incursion")
+
+    # --- an unload straight after a burst loses nothing -------------------
+    #
+    # The unload path is the one that cannot wait for a frame, and its
+    # unconditional write is what makes deferring every other write safe at
+    # all. No frame runs between the burst and the unload here, deliberately.
+    leaving = loaded_host()
+    leaving.fire_text_in(begins())
+    leaving.fire_text_in(phase_line(2, 4))
+    leaving.fire_text_in(SHELL_MOBS)
+    leaving.fire_text_in(SHELL_BOON)
+    res.check(leaving.saves == 0,
+              "the burst wrote to disk on the chat thread after all "
+              "(%d writes)" % leaving.saves)
+    leaving.fire("unload")
+    res.check(leaving.saves == 1,
+              "unloading straight after a burst, with no frame in between, "
+              "wrote nothing at all: the whole run is gone (%d writes)"
+              % leaving.saves)
+    res.check(leaving.settings["session"] != "",
               "unloading mid-run left nothing to come back to")
+
+    came_back = loaded_host(profile={"session": leaving.settings["session"]})
+    back = shell_run(came_back)
+    res.check(back is not None and back["instance"] == SHELL_INSTANCE,
+              "a run unloaded straight after a burst did not come back at all")
+    res.check(back is not None and int(back["phase"]) == 2,
+              "the run came back on the wrong phase: %r"
+              % (back["phase"] if back is not None else None,))
+    first_boon = back["boons"][1] if back is not None else None
+    res.check(first_boon is not None and first_boon["stats"] is not None,
+              "the boon picked a heartbeat before the unload was lost, which "
+              "is exactly the event the server never announces again")
+
+    # --- a cleared run leaves nothing owed --------------------------------
+    #
+    # A write marked before the clear must not land after it: reset() has just
+    # emptied the session string itself, so a pending flush would put the run
+    # straight back over it.
+    cleared = loaded_host()
+    cleared.fire_text_in(begins())
+    cleared.fire("command", command="/incursion reset")
+    saves_before = cleared.saves
+    cleared.fire("d3d_present")
+    res.check(cleared.saves == saves_before,
+              "a frame after /incursion reset wrote a run back over the "
+              "session the player had just cleared (%d writes)"
+              % (cleared.saves - saves_before))
+    res.check(cleared.settings["session"] == "",
+              "the run the player cleared came back on the next frame: %r"
+              % (cleared.settings["session"],))
+
+    # And a character change, which does its own clearing rather than calling
+    # reset(). A write owed by the old character must not land in the new
+    # character's settings.
+    swapped = loaded_host()
+    swapped.fire_text_in(begins())
+    swapped.switch_profile({"session": ""})
+    saves_before = swapped.saves
+    swapped.fire("d3d_present")
+    res.check(swapped.saves == saves_before,
+              "a frame after a character change wrote the previous "
+              "character's run into the new character's settings (%d writes)"
+              % (swapped.saves - saves_before))
+    res.check(swapped.settings["session"] == "",
+              "the new character's settings came back holding the previous "
+              "character's Incursion: %r" % (swapped.settings["session"],))
+
+    # --- the frame handler allocates nothing (PERF-02) --------------------
+    #
+    # ui.render reads two fields off its options table and keeps no handle on
+    # it -- passed, read, dropped -- so building a fresh one sixty times a
+    # second is pure GC churn, which is why ui.lua already hoists its own
+    # per-frame argument tables. One hoisted table, one field rewritten per
+    # frame; the other is fixed because the handler has already returned above
+    # when the window is not on screen.
+    frames = loaded_host()
+    frames.fire_text_in(begins())
+    frames.fire_text_in(phase_line(1, 3))
+    opts = frames.addon.get("FRAME_OPTS")
+    res.check(opts is not None,
+              "the frame handler still builds a fresh options table every "
+              "frame, sixty times a second, for a function that reads two "
+              "fields off it and drops it")
+    res.check(opts is not None and opts["visible"] is True,
+              "the hoisted options table does not ask for a visible window, "
+              "so the frame that reached render drew nothing: %r"
+              % (opts["visible"] if opts is not None else None,))
+
+    frames.fire("command", command="/incursion lock")
+    frames.imgui.reset()
+    frames.fire("d3d_present")
+    locked_begins = [args for n, args in frames.imgui.calls if n == "Begin"]
+    res.check(len(locked_begins) == 1,
+              "the locked frame opened %d windows, so nothing below is a "
+              "statement about the one window this addon draws"
+              % len(locked_begins))
+    locked_flags = (stubs.window_flags(locked_begins[0][2])
+                    if locked_begins else [])
+    res.check("NoMove" in locked_flags,
+              "/incursion lock no longer reaches the window: the one field "
+              "the hoisted table rewrites each frame stopped being written, "
+              "so the drag lock is dead. Flags that reached Begin: %s"
+              % ("|".join(locked_flags) or "none"))
+
+    frames.fire("command", command="/incursion lock")
+    frames.imgui.reset()
+    frames.fire("d3d_present")
+    free_begins = [args for n, args in frames.imgui.calls if n == "Begin"]
+    free_flags = (stubs.window_flags(free_begins[0][2])
+                  if free_begins else [])
+    res.check(bool(free_begins) and "NoMove" not in free_flags,
+              "unlocking the window left it locked, so the hoisted table was "
+              "written once and never again. Flags that reached Begin: %s"
+              % ("|".join(free_flags) or "none"))
 
     # --- the resume round trip, through the stubbed json both ways --------
 
