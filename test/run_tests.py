@@ -5283,6 +5283,39 @@ def test_record(parser):
                   % (label, None if found is None else found.groups(),
                      searches, markers, needles))
 
+    # --- the residual on the deferred write, in all three places ----------
+    #
+    # It was stated in three files as "roughly one frame", which is not the
+    # bound: the addon does not drive Present, so a minimised or throttled
+    # client stretches the window as far as it likes. And a crash was given
+    # as the only way to lose the write, when a raise inside persist() loses
+    # one too, with no crash and nothing on fire.
+    #
+    # Loose alternations rather than an exact phrase, so this pins the two
+    # facts and not one wording of them -- and positively, so it cannot pass
+    # by finding a differently wrong sentence the way an absent-phrase grep
+    # can.
+    # \s+ between words rather than a literal space: these passages are
+    # hard-wrapped prose, so the phrase being looked for is split across a
+    # newline in two of the three files.
+    bound = re.compile(
+        r"next\s+(frame\s+that\s+actually\s+runs|`?d3d_present`?)")
+    other = re.compile(
+        r"raise\s+inside|write\s+itself\s+fails|could\s+not\s+write", re.I)
+    for parts in (("inctrack", "inctrack.lua"), ("docs", "design.md"),
+                  ("README.md",)):
+        text = repo_text(*parts)
+        name = "/".join(parts)
+        res.check(bound.search(text) is not None,
+                  "%s states the deferred write's residual as a length of "
+                  "time or a number of frames; the bound is the next frame "
+                  "that actually runs, which the addon does not control"
+                  % name)
+        res.check(other.search(text) is not None,
+                  "%s gives a crash as the only way to lose the deferred "
+                  "write; a raise inside persist() loses one with nothing on "
+                  "fire at all" % name)
+
     return res
 
 

@@ -252,11 +252,24 @@ the mark, because there will be no further frame; that is what makes deferring
 every other write safe at all. The flag is consumed before the write, so a raise
 inside it cannot leave the flag set and retry sixty times a second.
 
-The residual is stated rather than hidden: between the chat line and the next
-frame there is a window of roughly one frame in which the newest event is not on
-disk, and a hard crash inside it loses that one event. That is the trade, taken
-knowingly against a synchronous serialise, JSON encode and disk write on the game
-thread on every chat line the client receives.
+The residual is stated rather than hidden, and stated at the size it actually
+is. The newest event is not on disk between the chat line and the next frame
+that actually runs. That is normally about one frame — but the bound is "the
+next `d3d_present`", not "16 ms": the addon does not drive Present, so a
+minimised, alt-tabbed or background-throttled client stretches the window as far
+as the client likes, and a client killed in it loses everything since the last
+frame that ran rather than one event. The unload handler covers every orderly
+departure; the profile-switch callback discards what is owed on purpose, because
+it belongs to the character that just left.
+
+Losing the write does not require a crash at all. A raise inside `persist()` —
+Ashita's `settings.save()` is a synchronous disk write, and a read-only settings
+file or a file another process holds will refuse it — is the other path, which
+is why that raise is caught, re-armed behind a five-second window and reported
+once rather than left silent.
+
+That is the trade, taken knowingly against a synchronous serialise, JSON encode
+and disk write on the game thread on every chat line the client receives.
 
 **Schema `version = 2`.** Version 1 was the format shipped by 1.1.0. The split of
 the phase counter changed the meaning of a field without changing its name:

@@ -120,8 +120,13 @@ that changes the run only marks it as owed a write — immediately for anything
 the server never repeats, and at most once every five seconds for everything
 else — and the next drawn frame performs the write, so nothing goes to disk
 while chat is being read. Unloading writes unconditionally, because there is no
-next frame to wait for. That leaves about one frame in which the newest event is
-not yet on disk; a hard crash inside it costs that one event and nothing more.
+next frame to wait for. That leaves a gap in which the newest event is not yet
+on disk. It is usually about one frame, but the bound is the next frame that
+actually runs — a client that is minimised or throttled in the background may
+not draw one for a while — so a crash in that gap costs whatever arrived since
+the last frame that ran. And a crash is not the only way: if the write itself
+fails, because the settings file is read-only or something else has it open,
+the addon says so once, keeps what it owes, and tries again shortly.
 
 This matters because the server's `Recovering session...` message only re-syncs
 the instance timer — it does **not** re-announce the objective, the phase, or
