@@ -155,7 +155,27 @@ Plans:
   4. `shorten()`'s memo cache stops growing at a stated bound when fed a stream of distinct server stat strings, and holds nothing from a previous run after a reset or character switch.
   5. `docs/design.md` states what the code does: `AlwaysAutoResize` plus a fixed-width spacer, `NoTitleBar`, the actual stats layout (points tracked, not displayed), the boons row, and the `elapsed_final` / `desynced` / `recovered` / `points_partial` / `bonus.loc` run-record fields. `CHANGELOG.md` has a 1.2.0 entry naming what changed, and `addon.version` in `inctrack/inctrack.lua` reads `'1.2.0'`.
 
-**Plans**: TBD (3 expected)
+**Plans**: 3 plans
+
+Plans:
+
+- [ ] 04-01-PLAN.md — PERF-01/04: the reject-path benchmark and its
+  head-of-phase baseline printed in the test report, an allocation-free cheap
+  gate called before `strip_colors`, the timestamp loop gated on a leading `[`,
+  a report-once guard on the last unrated chat output, and the `ascii()` fix
+  that keeps a log-driven failure message printable on a cp1252 console
+
+- [ ] 04-02-PLAN.md — PERF-02/03: the settings write marked on the chat thread
+  and flushed from the existing per-frame handler above both its early returns,
+  the unload path still writing unconditionally, the per-frame options table
+  hoisted, and `shorten()`'s memo cache bounded and cleared on reset or
+  character switch
+
+- [ ] 04-03-PLAN.md — DOC-01/02: `addon.version` at `'1.2.0'` with a changelog
+  entry in user-facing terms and a harness pin so the two cannot drift,
+  `docs/design.md` rewritten against the source rather than the two superseded
+  summaries, the `ui.lua` layout comment naming every row, the README
+  corrections, and the milestone's closing run, redeploy and hand-off
 
 ## Requirement Coverage
 
