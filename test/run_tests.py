@@ -1709,6 +1709,19 @@ def test_future_content(lua, parser, State):
     """
     res = Result("adaptability: unseen content still tracked")
 
+    # Every invented line this suite drives through the parser is remembered,
+    # so the cheap gate at the foot of the suite can be held to all of them
+    # without a second copy of the list going stale beside the first.
+    driven = []
+
+    def drive(state, lines):
+        driven.extend(lines)
+        feed(state, parser, lines)
+
+    def ev(line):
+        driven.append(line)
+        return parser.parse(line)
+
     # --- the failure message survives the console it is printed on --------
     #
     # at() is what the log-driven suites format their failure messages with,
@@ -1733,7 +1746,7 @@ def test_future_content(lua, parser, State):
     # A brand new instance with a new difficulty tier, more phases than any
     # instance has today, and an unusually large kill cap.
     s = new_state(lua, State)
-    feed(s, parser, [
+    drive(s, [
         "You have 120 minutes remaining inside this Incursion.",
         "Incursion [Castle Zvahl Baileys] Begins! (Mythic)",
         "New Objective: Defeat 40 enemies (Demon Pawn, Demon Knight)",
@@ -1751,7 +1764,7 @@ def test_future_content(lua, parser, State):
 
     # An objective phrased in a way no current message uses.
     s2 = new_state(lua, State)
-    feed(s2, parser, [
+    drive(s2, [
         "Incursion [Castle Zvahl Baileys] Begins! (Mythic)",
         "New Objective: Escort the Cardian to the sealed door at (H-8)!",
     ])
@@ -1763,32 +1776,32 @@ def test_future_content(lua, parser, State):
 
     # A counter in a shape we do not specifically know.
     s3 = new_state(lua, State)
-    feed(s3, parser, [
+    drive(s3, [
         "Incursion [Castle Zvahl Baileys] Begins! (Mythic)",
         "Incursion [Castle Zvahl Baileys] Seals Broken 2/6",
     ])
     res.check(extra_of(s3).get("Seals Broken") == (2, 6, False),
               "unknown counter dropped: %r" % extra_of(s3))
 
-    feed(s3, parser, ["Incursion [Castle Zvahl Baileys] Seals Broken 6/6"])
+    drive(s3, ["Incursion [Castle Zvahl Baileys] Seals Broken 6/6"])
     res.check(extra_of(s3).get("Seals Broken") == (6, 6, True),
               "unknown counter did not complete: %r" % extra_of(s3))
 
     # Several unknown counters coexist rather than overwriting each other.
-    feed(s3, parser, ["Incursion [Castle Zvahl Baileys] Braziers Lit 1/3"])
+    drive(s3, ["Incursion [Castle Zvahl Baileys] Braziers Lit 1/3"])
     got = extra_of(s3)
     res.check(got.get("Seals Broken") == (6, 6, True)
               and got.get("Braziers Lit") == (1, 3, False),
               "unknown counters collided: %r" % got)
 
     # An unknown completion line for a counter we have seen.
-    feed(s3, parser, ["Incursion [Castle Zvahl Baileys] Braziers Lit Complete!"])
+    drive(s3, ["Incursion [Castle Zvahl Baileys] Braziers Lit Complete!"])
     res.check(extra_of(s3).get("Braziers Lit") == (3, 3, True),
               "unknown completion not applied: %r" % extra_of(s3))
 
     # A bonus objective phrased in a new way, with its expiry still understood.
     s4 = new_state(lua, State)
-    feed(s4, parser, [
+    drive(s4, [
         "Incursion [Castle Zvahl Baileys] Begins! (Mythic)",
         "Bonus Objective: Light all four braziers! (Expires in 7 Minutes)",
     ])
@@ -1800,7 +1813,7 @@ def test_future_content(lua, parser, State):
 
     # A bonus with no expiry at all still registers.
     s5 = new_state(lua, State)
-    feed(s5, parser, [
+    drive(s5, [
         "Incursion [Castle Zvahl Baileys] Begins! (Mythic)",
         "Bonus Objective: Survive without a KO!",
     ])
@@ -1811,7 +1824,7 @@ def test_future_content(lua, parser, State):
 
     # Any other instance-tagged line surfaces as a transient note.
     s6 = new_state(lua, State)
-    feed(s6, parser, [
+    drive(s6, [
         "Incursion [Castle Zvahl Baileys] Begins! (Mythic)",
         "Incursion [Castle Zvahl Baileys] The gate grinds open.",
     ])
@@ -1820,7 +1833,7 @@ def test_future_content(lua, parser, State):
 
     # An unknown line for a different instance still resets a stale run.
     s7 = new_state(lua, State)
-    feed(s7, parser, [
+    drive(s7, [
         "Incursion [Giddeus] Begins! (Normal)",
         "Godwen gains 92 incursion points.",
         "Incursion [Castle Zvahl Baileys] Seals Broken 1/6",
@@ -1832,7 +1845,7 @@ def test_future_content(lua, parser, State):
     # A timestamp plugin may prepend '[HH:MM:SS] ' (even twice) to the live
     # message; the ^-anchored patterns must still match.
     s_ts = new_state(lua, State)
-    feed(s_ts, parser, [
+    drive(s_ts, [
         "[22:07:45] You have 90 minutes remaining inside this Incursion.",
         "[22:07:45] [22:07:45] Incursion [Fort Ghelsba] Begins! (Normal)",
         "[22:08:01] Incursion [Fort Ghelsba] Phase #1 3/20",
@@ -1844,9 +1857,9 @@ def test_future_content(lua, parser, State):
 
     # Chat that merely mentions Incursion must not be mistaken for content.
     s8 = new_state(lua, State)
-    feed(s8, parser, ["Incursion [Castle Zvahl Baileys] Begins! (Mythic)"])
+    drive(s8, ["Incursion [Castle Zvahl Baileys] Begins! (Mythic)"])
     before = s8.snapshot(s8)["instance"]
-    feed(s8, parser, [
+    drive(s8, [
         "[2]<Larios> LFM Palborough Mines Incursion 5@",
         "Zsoleara : !incursions",
         "anyone know the best way to skillup from incursion parties?",
@@ -1870,9 +1883,6 @@ def test_future_content(lua, parser, State):
     # The corresponding "and nothing real stopped parsing" guarantee is not
     # here: it is the parser suites over the 127-log corpus, which pin the
     # structural parse count and keep the generic tier silent.
-
-    def ev(line):
-        return parser.parse(line)
 
     # -- HARD-02: the split anchors on the last ' at ' before the coordinate
     # -- group, so a name carrying that substring survives whole.
@@ -2015,6 +2025,150 @@ def test_future_content(lua, parser, State):
               and e["stats"] == "VIT+10 / Damage taken-15%",
               "a boon whose stats carry a percent sign was lost or mangled: "
               "%r" % ((e and (e["name"], e["stats"])),))
+
+    # ---- PERF-01: the cheap gate is a superset of the matchers -----------
+    #
+    # parser.relevant runs before any allocation, on the raw line, and decides
+    # whether a line is ever parsed at all. The two directions are not
+    # symmetric and only one of them is a hazard:
+    #
+    #   a false positive costs one wasted strip_colors on a line that is then
+    #   rejected by the anchored gate underneath, and nothing else;
+    #
+    #   a false negative loses a line the server did send, for good, and looks
+    #   exactly like a quiet stretch of chat. Nothing is logged, nothing is
+    #   drawn differently, and the window simply stops keeping up.
+    #
+    # So the rule below is an implication in one direction: everything any
+    # matcher accepts, the gate accepts. It is written as an implication over
+    # the fixtures rather than as a copied list of expected booleans, so a
+    # matcher added later is covered by adding a fixture -- there is no list
+    # of answers to forget to extend.
+    #
+    # The sampling rule is one fixture per distinct SHAPE a matcher can
+    # accept, not one per matcher. A matcher carrying an optional group or one
+    # of the two-attempt fallback alternations has more than one shape, and
+    # each shape gets its own line. Two of them are named here rather than
+    # left to sampling, because the whole difference between them is a single
+    # optional 's' sitting inside the region a needle would otherwise cover:
+    # at the one-minute warning the server sends 'You have 1 minute remaining
+    # inside this Incursion.', and a needle carrying the plural would drop the
+    # instance clock at the moment the player most needs it.
+    SUPERSET = (
+        # begin, recover, complete, bonus complete, bonus progress, phase --
+        # one shape each, all carrying the Incursion tag.
+        "Incursion [Castle Zvahl Baileys] Begins! (Mythic)",
+        "Incursion [Castle Zvahl Baileys] Recovering session...",
+        "Incursion [Castle Zvahl Baileys] Complete! (Mythic) Time: 48m 44s",
+        "Incursion [Castle Zvahl Baileys] Bonus Objective Complete!",
+        "Incursion [Castle Zvahl Baileys] Bonus Objective: Demon Pawn 2/5",
+        "Incursion [Castle Zvahl Baileys] Phase #12 31/40",
+        # objective_kills -- one shape.
+        "New Objective: Defeat 40 enemies (Demon Pawn, Demon Knight)",
+        # objective_boss -- two shapes: the precise form, whose location is a
+        # parenthesised group, and the 1.1.0 fallback, whose location is not.
+        "New Objective: Defeat Demon Overlord at (K-7) (Map #4)!",
+        "New Objective: Defeat Demon Overlord at the sealed door!",
+        # boss_hint -- the same two shapes.
+        "(Boss: Demon Overlord at (K-7) (Map #4))",
+        "(Boss: Demon Overlord at the sealed door)",
+        # the chest bonus -- two shapes, plural and singular expiry.
+        "Bonus Objective: Find the hidden chest! (Expires in 10 Minutes)",
+        "Bonus Objective: Find the hidden chest! (Expires in 1 Minute)",
+        # the count bonus -- the same two.
+        "Bonus Objective: Defeat 5 Demon Pawn! (Expires in 10 Minutes)",
+        "Bonus Objective: Defeat 5 Demon Pawn! (Expires in 1 Minute)",
+        # the named-NM bonus -- four: precise and fallback, each plural and
+        # singular.
+        "Bonus Objective: Defeat Demon Marshal at (H-9) (Map #2)! "
+        "(Expires in 10 Minutes)",
+        "Bonus Objective: Defeat Demon Marshal at (H-9) (Map #2)! "
+        "(Expires in 1 Minute)",
+        "Bonus Objective: Defeat Demon Marshal at the sealed door! "
+        "(Expires in 10 Minutes)",
+        "Bonus Objective: Defeat Demon Marshal at the sealed door! "
+        "(Expires in 1 Minute)",
+        # the instance clock -- two shapes, and the singular is the reason
+        # this table samples shapes rather than matchers.
+        "You have 90 minutes remaining inside this Incursion.",
+        "You have 1 minute remaining inside this Incursion.",
+        # points -- one shape.
+        "Godwen gains 84 incursion points.",
+        # boon -- two shapes: a glyph group with something in it, and the
+        # empty one WR-04 restored.
+        "Godwen gains the effect of Ronin's Revenge (%s): Store TP+8" % GLYPH,
+        "Godwen gains the effect of Ronin's Revenge (): Store TP+8",
+        # the generic tier: a counter, a completion, a bare note, an unknown
+        # objective wording and an unknown bonus wording -- one shape each,
+        # and none of them anything the server sends today.
+        "Incursion [Castle Zvahl Baileys] Seals Broken 2/6",
+        "Incursion [Castle Zvahl Baileys] Braziers Lit Complete!",
+        "Incursion [Castle Zvahl Baileys] The gate grinds open.",
+        "New Objective: Escort the Cardian to the sealed door at (H-8)!",
+        "Bonus Objective: Light all four braziers! (Expires in 7 Minutes)",
+        # and the timestamp plugin's prefix, singly and doubled, since the
+        # gate runs before any of it is stripped.
+        "[22:07:45] You have 90 minutes remaining inside this Incursion.",
+        "[22:07:45] [22:07:45] Incursion [Fort Ghelsba] Begins! (Normal)",
+    )
+
+    # The antecedent, pinned once: a fixture no matcher accepts would make its
+    # implication below vacuously true and prove nothing at all.
+    unmatched = [line for line in SUPERSET if parser.parse(line) is None]
+    res.check(not unmatched,
+              "the superset table holds %d line(s) no matcher accepts, so the "
+              "gate checks below prove nothing about them: %s"
+              % (len(unmatched), unmatched))
+
+    for line in SUPERSET:
+        res.check(bool(parser.relevant(line)),
+                  "the server sends this and the parser understands it, but "
+                  "the cheap gate drops it before anything is ever parsed, so "
+                  "the window would simply stop keeping up: %r" % line)
+
+    # And every invented line this suite drove through the parser above, held
+    # to the same implication. A fixture written for some other reason is
+    # covered here for free, which is what keeps this honest as the suite
+    # grows.
+    for line in sorted(set(driven)):
+        if parser.parse(line) is None:
+            continue
+        res.check(bool(parser.relevant(line)),
+                  "an invented future line this suite already tracks is "
+                  "dropped by the cheap gate before it can be parsed: %r"
+                  % line)
+
+    # ---- and the gate says no to ordinary chat --------------------------
+    #
+    # Not a correctness requirement -- a false positive is free -- but the
+    # counter-pin that says the gate is not simply answering yes to
+    # everything, which would satisfy every check above and buy nothing.
+    ORDINARY = (
+        "Godwen hits the Nest Skitterer for 42 points of damage.",
+        "The Nest Skitterer misses Godwen.",
+        "Godwen uses Fast Blade.",
+        "Rialla casts Cure III on Godwen.",
+        "Godwen obtains a square of Yagudo cloth.",
+        "Rialla >> pulling the next group, hold here a moment",
+        "Zsoleara : !incursions",
+        "You cannot use that command at this time.",
+        "Godwen defeats the Nest Drone.",
+        # The two that say the needle is 'Incursion [' and not 'Incursion':
+        # chat that names the content, and a currency line that carries it in
+        # passing. Both are lines the suite above already drives past the
+        # parser; here they have to get past the gate as well.
+        "[2]<Larios> LFM Palborough Mines Incursion 5@",
+        "You store Orcish Steel x38 (Total: 292) Incursion >> Currencies",
+    )
+    accepted = [line for line in ORDINARY if parser.parse(line) is not None]
+    res.check(not accepted,
+              "the rejection table holds %d line(s) the parser does accept, "
+              "so the gate is being asked to decline something real: %s"
+              % (len(accepted), accepted))
+    for line in ORDINARY:
+        res.check(not parser.relevant(line),
+                  "the cheap gate answers yes to ordinary chat, so it saves "
+                  "nothing on the traffic it exists for: %r" % line)
 
     return res
 
@@ -3548,6 +3702,110 @@ def test_addon_shell():
     res.check(shell_run(idle) is None,
               "an unrelated combat line invented a run")
 
+    # --- PERF-01: and 'nothing' now means no allocation either ------------
+    #
+    # 'Costs nothing' above meant no run, no save and no chat. This is the
+    # other half, and it is the half that is paid on every chat line the
+    # client receives, forever: the line must be turned away before a string
+    # is allocated for it. strip_colors is the shell's own call, so only the
+    # shell can decline to make it -- no reordering inside parser.lua reaches
+    # this. The gsub counter catches trim and the timestamp loop underneath.
+    free = loaded_host()
+    free.count_gsub()
+    strip_before, gsub_before = free.strip_colors_calls, free.gsub_calls
+    free.fire_text_in("Godwen hits the Nest Weevil for 42 points of damage.")
+    e_free = free.fire_text_in("Rialla casts Cure III on Godwen.")
+    res.check(free.strip_colors_calls == strip_before,
+              "a chat line that is none of the addon's business still paid "
+              "for a colour strip -- two gsubs and two allocations, on the "
+              "game thread, on every line in a crowded zone")
+    res.check(free.gsub_calls == gsub_before,
+              "a chat line that is none of the addon's business still ran "
+              "%d gsub(s): the trim and the timestamp loop are still being "
+              "paid for on traffic the addon ignores"
+              % (free.gsub_calls - gsub_before))
+    res.check(e_free["message"] == "Rialla casts Cure III on Godwen."
+              and e_free["message_modified"] is None
+              and e_free["blocked"] is None,
+              "the early return rewrote or swallowed the line it declined")
+
+    # The counter-pin. Every check above is satisfied by a gate that says no
+    # to everything, and a gate that says no to everything is the silent-drop
+    # failure this whole design exists to prevent.
+    busy = loaded_host()
+    busy.count_gsub()
+    strip_before, gsub_before = busy.strip_colors_calls, busy.gsub_calls
+    busy.fire_text_in(begins())
+    res.check(busy.strip_colors_calls > strip_before
+              and busy.gsub_calls > gsub_before,
+              "a line the addon does care about was turned away by the gate "
+              "as cheaply as one it does not, which means it was not parsed")
+    res.check(shell_run(busy) is not None,
+              "the line that starts a run no longer starts one")
+
+    # --- a colour code makes the gate decline to judge --------------------
+    #
+    # The gate runs on the raw message, before strip_colors, and Ashita's
+    # colour codes are a marker byte plus one payload byte that can land
+    # anywhere -- including between two characters of one of the gate's own
+    # needles. So a coloured line is one the gate is not entitled to judge and
+    # declines to: it costs exactly what it cost before this change, and never
+    # more. That is what makes a false negative impossible rather than
+    # unlikely.
+    tinted = loaded_host()
+    tinted.count_gsub()
+    strip_before = tinted.strip_colors_calls
+    chat_before = len(tinted.chat)
+    tinted.fire_text_in(CC_A + "Godwen hits the Nest Weevil for 42 points "
+                               "of damage.")
+    res.check(tinted.strip_colors_calls > strip_before,
+              "a coloured line was judged on its raw bytes instead of being "
+              "let through, which is how a real line gets dropped for a code "
+              "sitting inside a needle")
+    res.check(shell_run(tinted) is None and len(tinted.chat) == chat_before,
+              "a coloured combat line invented a run or reached the player's "
+              "chat -- the anchored rejection underneath stopped working")
+
+    # The safety pin for the whole design: a code inside a needle. Stripped,
+    # this is an ordinary 'Begins!' line; raw, the marker sits in the middle
+    # of 'Incursion [' and every plain search for it answers no.
+    hidden = begins()
+    split = hidden.index("Incursion ") + 5
+    hidden = hidden[:split] + CC_B + hidden[split:]
+    res.check(all(needle not in hidden
+                  for needle in ("Incursion [", "New Objective: ",
+                                 "Bonus Objective: ", "(Boss: ")),
+              "the fixture does not actually hide the needle, so the check "
+              "below would pass with the colour fall-through removed: %r"
+              % hidden)
+    coded = loaded_host()
+    coded.fire_text_in(hidden)
+    res.check(shell_run(coded) is not None,
+              "a colour code landing inside one of the gate's needles lost "
+              "the line that starts a run -- silently, with the window simply "
+              "never appearing")
+
+    # --- the timestamp loop only runs for a line that carries a stamp -----
+    #
+    # A gsub apiece, on every line, for a prefix that almost never appears.
+    # Two fresh hosts doing identical work but for the stamp, so the
+    # difference between their counters is the loop and nothing else.
+    plainly, stamped = loaded_host(), loaded_host()
+    plainly.count_gsub()
+    stamped.count_gsub()
+    plain_before, stamp_before = plainly.gsub_calls, stamped.gsub_calls
+    plainly.fire_text_in(begins())
+    stamped.fire_text_in("[22:07:45] " + begins())
+    plain_cost = plainly.gsub_calls - plain_before
+    stamp_cost = stamped.gsub_calls - stamp_before
+    res.check(shell_run(plainly) is not None and shell_run(stamped) is not None
+              and shell_run(plainly)["instance"] == shell_run(stamped)["instance"],
+              "a timestamp plugin's prefix changed what the window shows")
+    res.check(stamp_cost > plain_cost,
+              "the stamped line cost no more than the unstamped one (%d vs "
+              "%d gsubs), so either the loop runs for both or it runs for "
+              "neither" % (stamp_cost, plain_cost))
+
     # --- the MUST_SAVE policy, driven by the injected clock ---------------
 
     # The only thing standing between a mid-run reload and a blank window for
@@ -4446,6 +4704,44 @@ def test_reject_cost(parser, backend):
                 REJECT_BASELINE["backend"], REJECT_BASELINE["python"],
                 thousands(REJECT_BASELINE["lines_per_second"]),
                 REJECT_BASELINE["us_per_line"]))
+
+    # --- what the figures above have to say ------------------------------
+
+    free_n = len(REJECT_FREE)
+    old_strip, old_gsub = counts[("__bench_old", "free")]
+    new_strip, new_gsub = counts[("__bench_new", "free")]
+
+    res.check(new_strip == 0,
+              "a colour-free line the addon ignores still paid for %.2f "
+              "colour strips apiece -- two gsubs and two allocations, on the "
+              "game thread, on every line the client receives"
+              % (new_strip / free_n))
+    res.check(new_gsub == 0,
+              "a colour-free line the addon ignores still ran %.2f gsubs "
+              "apiece: the trim and the timestamp loop are still being paid "
+              "for on traffic that is turned away" % (new_gsub / free_n))
+    res.check(old_strip == free_n,
+              "the Phase-3 copy did not strip colours once per line (%d over "
+              "%d lines), so it is not the shape it claims to be"
+              % (old_strip, free_n))
+    res.check(old_gsub > 0,
+              "the Phase-3 copy allocated nothing either, so the comparison "
+              "above is between two identical shapes and says nothing")
+
+    # The one wall-clock assertion in the whole suite, and it is safe because
+    # it never leaves this run: a ratio between two shapes measured on the
+    # same corpus on the same machine within the same second. Hard rule 10 is
+    # about figures that travel between machines, and this one does not.
+    #
+    # 1.2 is a noise margin, not a target. The real gap is a constant factor
+    # -- five allocations against none -- and lands far above it; a bare '>'
+    # on a single best-of-three pair would carry no margin at all and would be
+    # the one thing in the suite able to flake on a busy machine.
+    res.check(ratio >= 1.2,
+              "the reject path is only %.2fx the shape Phase 3 shipped over "
+              "the same corpus in the same run, which is inside the noise: "
+              "whatever PERF-01 changed, it did not change what a line the "
+              "addon ignores costs" % ratio)
 
     return res
 
