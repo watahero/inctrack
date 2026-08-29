@@ -33,10 +33,14 @@ instead, and the cost paid on every chat line cut.
 - Clearing a run no longer lets its instance timer leak into the next one.
 - A chat line the addon does not care about is now turned away before anything
   is built for it: no copy of the line, no colour stripping, no pattern run.
-  About three and a half times cheaper on the reject path. A coloured line still
-  pays for its colour stripping, because the addon deliberately refuses to judge
-  a line it has not yet uncoloured — a colour code can land in the middle of the
-  very words it would be looking for.
+  About three and a half times cheaper on the reject path, measured over a test
+  corpus that is three quarters uncoloured lines. How much of that a real chat
+  window sees depends on how much of its traffic carries colour, and that is not
+  something the recorded logs can answer: Ashita strips the colour codes on the
+  way to disk, so every logged line reads as uncoloured whatever it looked like
+  on screen. A coloured line still pays for its colour stripping, because the
+  addon deliberately refuses to judge a line it has not yet uncoloured — a colour
+  code can land in the middle of the very words it would be looking for.
 - Saving the run no longer happens while chat is being read; it rides the next
   frame, and unloading still writes the run down unconditionally.
 - If that write is refused — a read-only settings file, or something else

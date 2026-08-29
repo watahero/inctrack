@@ -6018,6 +6018,17 @@ def test_reject_cost(parser, backend):
     machine, and the recorded baseline is provenance, not a bar to clear. The
     checks here are the deterministic counters plus, once there is a
     difference to measure, one same-run ratio between the two shapes.
+
+    Nor is the ratio a fact about the player. It is a weighted average over
+    this corpus's colour mix, and a coloured line is one the gate declines to
+    judge on purpose, so it costs exactly what it always did. Weight the mix
+    the other way and the same code reports a smaller number. What the mix
+    really is in a live chat window cannot be settled from the recorded logs
+    -- Ashita strips the marker bytes before a line reaches disk, so every one
+    of the 2.9M recorded lines reads as colour-free whatever it was on screen.
+    That is why the assertions below are the per-class counters, which hold
+    whatever the mix is, and why the ratio is qualified in the report where it
+    is printed.
     """
     res = Result("cost: the non-Incursion reject path")
 
@@ -6060,6 +6071,18 @@ def test_reject_cost(parser, backend):
     res.note("new shape (shipped):  %s lines/s, %.3f us/line"
              % (thousands(rate["__bench_new"]), micros["__bench_new"]))
     res.note("new/old: %.2fx" % ratio)
+    # The one qualification the headline figure needs, printed beside it
+    # rather than left to a reader to work out from the corpus line above.
+    res.note("that ratio is a property of this corpus's colour mix (%d of %d "
+             "lines colour-free), not a measurement of the player's: a "
+             "coloured line is one the gate declines to judge and it costs "
+             "what it always did, so a more heavily coloured mix moves the "
+             "figure toward 1.00x. The real mix is not measurable here -- "
+             "Ashita's log writer strips the marker bytes on the way to "
+             "disk, so every recorded line reads as colour-free whatever it "
+             "was on screen. The per-class counters below are the part of "
+             "this that does not depend on the mix"
+             % (len(REJECT_FREE), len(REJECT_CORPUS)))
     for group, label in (("free", "colour-free"), ("colour", "coloured")):
         n = len(REJECT_FREE if group == "free" else REJECT_COLOURED)
         old_s, old_g = counts[("__bench_old", group)]
