@@ -108,6 +108,30 @@ completed: 2026-08-28
 status: complete
 ---
 
+> **SUPERSEDED IN PART BY THE PHASE-1 CODE REVIEW (findings CR-01 and WR-03).**
+> This summary was written before review. Two of the stub constants it tables
+> are no longer what ships, and both changed for the same reason: the values it
+> records made a statement of `ui.lua` invisible to the suite that claims to
+> cover it.
+>
+> **Window padding is 11.0, not 8.0** — `test/stubs.py` (`local PADDING =
+> 11.0`). `ui.lua`'s file default for `origin_x` is 8 and `Begin` overwrites it
+> with `GetCursorPosX()`; a stub padding of 8 made that assignment a no-op, so
+> every right-aligned value and wrap position in all six windows was identical
+> whether the line ran or not. Every position in the sample frame below is
+> therefore 3px further right than shown: `PushTextWrapPos 308.00` is
+> `PushTextWrapPos 311`, and the two `SetCursorPosX` values move with it.
+>
+> **`_num` no longer emits `.00` for a whole number** — it normalises to float
+> and prints an integral value plainly, so `308.00` above is written `311` and
+> not `311.00`. The formatting was branched on the Python type `lupa` handed
+> back, which differs by backend: the same six windows passed on one Lua and
+> failed on another, blaming `ui.lua` for a defect in the recorder.
+>
+> `test/stubs.py` is the truth for both. See `01-REVIEW.md`.
+>
+
+
 # Phase 1 Plan 01: The Net Summary
 
 **A recording ImGui stub, in-memory Ashita fakes and a pure-Lua json that let the suite load and run all 734 previously-unreachable lines of `ui.lua` and `inctrack.lua`, plus `make_host()`, upvalue reflection into the addon's file-scope locals, and an expected-failure mechanism that reports distinctly without turning the run red.**

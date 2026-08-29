@@ -152,6 +152,31 @@ completed: 2026-08-29
 status: complete
 ---
 
+> **SUPERSEDED IN PART BY THE PHASE-4 CODE REVIEW (finding CR-02).** This
+> summary was written before review. It describes the move of `persist()` out
+> of `text_in` and onto the frame handler — "only the write moved" — and that
+> is the half of it that shipped. What it does not describe is the containment
+> the move turned out to need, and which the frame handler now has.
+>
+> `persist()` calls `state:serialise()` and Ashita's synchronous
+> `settings.save()`; only the encode inside it was ever protected. Inside
+> `text_in` the whole call had been covered by that handler's `pcall`. As the
+> first statement of `d3d_present` it had nothing around it, so a raise from a
+> refused write escaped onto the game thread every addon in the process shares
+> — the exact failure the render `pcall` below it exists to prevent — and took
+> the owed write with it, flag already cleared, with nobody told.
+>
+> What ships is the flush wrapped in `pcall(persist)`; on a raise `save_due` is
+> **re-armed** rather than lost and `save_retry_at` is set to `now() +
+> SAVE_RETRY_SECONDS` (5.0), so the retry is throttled instead of running every
+> frame; and a `save_told` latch reports the failure **once** a session — with
+> the error text passed as an argument and never as a format string — cleared
+> by `reset()` and by the profile switch. Pinned by 24 addon-suite checks
+> against a stub whose `settings.save()` can be made to raise. Commit
+> `9d85dc5`; see `04-REVIEW.md` and `04-REVIEW-FIX.md`.
+>
+
+
 # Phase 4 Plan 2: Off the Chat Thread, and a Bound on the Cache Summary
 
 **The settings write left the game thread — `text_in` now marks the run as owed a write and `d3d_present` performs it above both of its early returns — and `shorten()`'s memo cache stopped being able to grow for a whole play session.**
