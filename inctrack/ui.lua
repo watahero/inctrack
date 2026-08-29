@@ -404,7 +404,16 @@ function ui.render(state, opts)
 
     imgui.PushStyleVar(ImGuiStyleVar_ItemSpacing, ARG_PAD_TIGHT);
 
-    if imgui.Begin('inctrack###incursion_window', flags) then
+    -- Explicit nil for p_open. Ashita's binding is declared once and
+    -- positionally -- Begin(const char* name, bool* p_open, ImGuiWindowFlags
+    -- flags), plugins/sdk/imgui.h:305 -- and addons/libs/imgui.lua adds no
+    -- wrapper of its own: it is a constants table whose __index is
+    -- AshitaCore:GetGuiManager(), so this call reaches that signature
+    -- unmediated. Flags must therefore go in slot 3. Passing nil is not the
+    -- same as passing a box and ignoring it: it asks for no close control at
+    -- all, which is what this window wants -- it is drawn without a title
+    -- bar, so there is nowhere for one to appear.
+    if imgui.Begin('inctrack###incursion_window', nil, flags) then
         origin_x = imgui.GetCursorPosX();
         imgui.Dummy(ARG_SPACER);   -- pins the content width to CONTENT_W
 

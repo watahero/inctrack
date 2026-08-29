@@ -211,9 +211,26 @@ function imgui.Dummy(size)
 end
 
 --[[
-* Begin has two real call shapes: a table second argument is the p_open
-* boolean-box, a number second argument is the flags. Both are recorded as
-* they arrived, so a test can tell which was used.
+* Begin is strictly positional, because the host's is. Ashita declares it
+* exactly once --
+*
+*     virtual bool Begin(const char* name, bool* p_open = nullptr,
+*                        ImGuiWindowFlags flags = 0) = 0;
+*     (Ashita/plugins/sdk/imgui.h:305)
+*
+* -- with no overload, and addons/libs/imgui.lua adds no Lua wrapper that
+* could reshape the call: it is a constants table whose __index is
+* AshitaCore:GetGuiManager(), so an addon's imgui.Begin lands on that
+* signature unmediated. Slot 2 is p_open and slot 3 is flags, always.
+*
+* Nothing here type-sniffs a numeric slot 2 into flags. An earlier version of
+* this stub did, which made the suite bless a call shape no addon in the
+* install uses and the host never promised: flags handed to slot 2 are a
+* p_open in game, so the window would silently lose NoTitleBar and
+* AlwaysAutoResize -- or the binding would raise, once per frame, inside
+* d3d_present. A stub that accepts what the host rejects is worse than no
+* stub, so this one accepts only what the header declares and the arguments
+* are recorded exactly as they arrived, positions included.
 *
 * The close button is modelled honestly. When the click switch is armed,
 * Begin writes false into the p_open box only if the recorded flags do not
@@ -221,14 +238,7 @@ end
 * title bar, so on such a window an armed click cannot reach one.
 ]]--
 function imgui.Begin(...)
-    local name, a, b = ...;
-    local box, flags;
-    if type(a) == 'table' then
-        box = a;
-        flags = b;
-    elseif type(a) == 'number' then
-        flags = a;
-    end
+    local _, p_open, flags = ...;
 
     record('Begin', ...);
 
@@ -237,8 +247,9 @@ function imgui.Begin(...)
 
     if S.armed then
         S.armed = false;
-        if box ~= nil and not has_flag(flags, ImGuiWindowFlags_NoTitleBar) then
-            box[1] = false;
+        if type(p_open) == 'table'
+                and not has_flag(flags, ImGuiWindowFlags_NoTitleBar) then
+            p_open[1] = false;
         end
     end
 
@@ -463,16 +474,22 @@ class ImGuiRecorder:
         return "\n".join(lines)
 
     def _begin_line(self, args, cmap):
+        """One recorded Begin, rendered by argument *position*.
+
+        The host's Begin is a single positional signature -- Begin(name,
+        p_open, flags) -- so slot 2 is reported as p_open and slot 3 as
+        flags, whatever type happens to be sitting in them. The snapshot
+        therefore records which slot each value arrived in rather than
+        inferring the caller's intent from its type, and flags handed to
+        slot 2 show up as a p_open with no flags at all -- a visible,
+        diffable line rather than a shape the recorder quietly forgave.
+        """
         parts = ["Begin"]
         if args:
             parts.append(_render(args[0], cmap))
-        box = args[1] if len(args) > 1 else None
-        if lua_type(box) == "table":
-            parts.append("p_open=" + _render(box, cmap))
-            flags = args[2] if len(args) > 2 else None
-        else:
-            flags = box
-        names = window_flags(flags)
+        parts.append(
+            "p_open=" + _render(args[1] if len(args) > 1 else None, cmap))
+        names = window_flags(args[2] if len(args) > 2 else None)
         parts.append("flags=" + ("|".join(names) if names else "none"))
         return " ".join(parts)
 

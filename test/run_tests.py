@@ -1529,7 +1529,7 @@ def first_diff(got, want):
 #    'Next:' line with a right-aligned location.
 WINDOW_MID_PHASE = expected_window("""
 PushStyleVar 13 [4, 2]
-Begin 'inctrack###incursion_window' flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+Begin 'inctrack###incursion_window' p_open=nil flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
   TextColored instance 'Crawlers' Nest Depths'
   SameLine
@@ -1563,7 +1563,7 @@ PopStyleVar 1
 #    kill line and its mob list are gone.
 WINDOW_BOSS_UP = expected_window("""
 PushStyleVar 13 [4, 2]
-Begin 'inctrack###incursion_window' flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+Begin 'inctrack###incursion_window' p_open=nil flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
   TextColored instance 'Crawlers' Nest Depths'
   SameLine
@@ -1590,7 +1590,7 @@ PopStyleVar 1
 #    objective has been announced, so the objective section says so.
 WINDOW_BONUS = expected_window("""
 PushStyleVar 13 [4, 2]
-Begin 'inctrack###incursion_window' flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+Begin 'inctrack###incursion_window' p_open=nil flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
   TextColored instance 'Crawlers' Nest Depths'
   SameLine
@@ -1639,7 +1639,7 @@ PopStyleVar 1
 #    the old phase's boss would be a lie.
 WINDOW_RECONNECTED = expected_window("""
 PushStyleVar 13 [4, 2]
-Begin 'inctrack###incursion_window' flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+Begin 'inctrack###incursion_window' p_open=nil flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
   TextColored instance 'Crawlers' Nest Depths'
   SameLine
@@ -1671,7 +1671,7 @@ PopStyleVar 1
 #    do-not-overprint branch at ui.lua:96-100.
 WINDOW_FINISHED = expected_window("""
 PushStyleVar 13 [4, 2]
-Begin 'inctrack###incursion_window' flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+Begin 'inctrack###incursion_window' p_open=nil flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
   TextColored instance 'Crawlers' Nest Depths'
   SameLine
@@ -1695,7 +1695,7 @@ PopStyleVar 1
 #    HARD-01 in Phase 3 and is deliberately not attempted here.
 WINDOW_PERCENT = expected_window("""
 PushStyleVar 13 [4, 2]
-Begin 'inctrack###incursion_window' flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+Begin 'inctrack###incursion_window' p_open=nil flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
   TextColored instance 'Vault 50% Sealed'
   SameLine
@@ -2069,6 +2069,74 @@ def test_ui():
               "the window asks for a close control it can never show -- it "
               "is drawn without a title bar, so the player has nothing to "
               "click")
+
+    # --- CR-01: which slot each Begin argument arrived in ------------------
+
+    # Ashita declares Begin exactly once, and positionally:
+    #
+    #     virtual bool Begin(const char* name, bool* p_open = nullptr,
+    #                        ImGuiWindowFlags flags = 0) = 0;
+    #     (Ashita/plugins/sdk/imgui.h:305)
+    #
+    # There is no overload, and addons/libs/imgui.lua adds no Lua wrapper that
+    # could reshape the call -- it is a constants table whose __index is
+    # AshitaCore:GetGuiManager(), so the call lands on that signature
+    # unmediated. Flags handed to slot 2 are therefore not flags: they are a
+    # p_open. In game the window would come back with a title bar, resizable,
+    # collapsible, stealing focus, no longer fitting its own height and no
+    # longer honouring /incursion lock -- or the binding would raise
+    # 'bad argument #2' sixty times a second inside d3d_present.
+    #
+    # A layout snapshot cannot catch that on its own: it compares what was
+    # drawn, and this is a fault in how the drawing was *requested*. So the
+    # argument positions are pinned here by name, each with the symptom it
+    # produces, and the recorder no longer forgives a numeric slot 2.
+    shape_host = make_host()
+    shape_parser = shape_host.require("parser")
+    ShapeState = shape_host.require("state")
+    shape_ui = shape_host.require("ui")
+
+    shape = new_state(shape_host.lua, ShapeState)
+    feed(shape, shape_parser, mid_phase)
+    shape_host.imgui.reset()
+    shape_ui.render(
+        shape, shape_host.lua.table_from({"visible": True, "locked": True}))
+
+    shape_begins = [args for n, args in shape_host.imgui.calls
+                    if n == "Begin"]
+    res.check(len(shape_begins) == 1,
+              "the frame opened %d windows, so nothing below is a statement "
+              "about the one window this addon draws" % len(shape_begins))
+
+    for args in shape_begins:
+        res.check(len(args) == 3,
+                  "Begin was called with %d arguments -- the host's signature "
+                  "is Begin(name, p_open, flags), so a shorter call leaves "
+                  "the flags behind entirely" % len(args))
+
+        p_open = args[1] if len(args) > 1 else None
+        res.check(not isinstance(p_open, (int, float)),
+                  "a number reached Begin's slot 2, which is p_open and not "
+                  "flags -- in game every flag ui.render computed would be "
+                  "dropped (title bar back, no auto-resize, /incursion lock "
+                  "dead) or the binding would raise once per frame")
+        res.check(p_open is None,
+                  "Begin's slot 2 is %r, not nil -- this window is drawn "
+                  "without a title bar, so it must ask for no close control "
+                  "at all rather than one it can never show" % (p_open,))
+
+        flags = args[2] if len(args) > 2 else None
+        res.check(isinstance(flags, (int, float))
+                  and not isinstance(flags, bool),
+                  "Begin's slot 3 holds %r rather than a flags number, so the "
+                  "window asked for none of the flags ui.render computed"
+                  % (flags,))
+        got_flags = stubs.window_flags(flags)
+        for flag in ("NoTitleBar", "AlwaysAutoResize", "NoFocusOnAppearing",
+                     "NoMove"):
+            res.check(flag in got_flags,
+                      "%s never reached the host: the flags Begin actually "
+                      "received are %s" % (flag, "|".join(got_flags) or "none"))
 
     # No clock to reset at the end of this suite: every case above builds and
     # discards its own host, so nothing it advanced is shared with any other
