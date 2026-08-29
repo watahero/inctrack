@@ -1,227 +1,273 @@
 # Testing Patterns
 
-**Analysis Date:** 2026-08-28
+**Analysis Date:** 2026-08-29
 
 ## Test Framework
 
-**Runner:** none. `test/run_tests.py` (956 lines) is a **standalone Python script** — no pytest, no unittest, no test discovery. It defines its own `Result` class, prints its own report, and exits `0` / `1`.
+**Runner:** none. `test/run_tests.py` (6,255 lines) is a self-contained
+harness with its own `Result` collector — no pytest, no unittest, no CI, no
+build step. `test/stubs.py` (1,504 lines) supplies the Ashita and ImGui hosts.
 
-**Assertion library:** none. A hand-rolled collector in `test/run_tests.py`:
-```python
-class Result:
-    def __init__(self, title):
-        self.title = title
-        self.checks = 0
-        self.failures = []
-        self.notes = []
+**Dependency:** `lupa` only (`pip install lupa`). The harness loads the
+*shipped* Lua from `inctrack/` into an embedded interpreter, so a pass means
+the shipped code behaves, not a reimplementation. Nothing under `inctrack/` is
+modified, mocked or wrapped.
 
-    def check(self, cond, msg):
-        self.checks += 1
-        if not cond:
-            self.failures.append(msg)
-```
-Failures **accumulate** rather than abort — one broken pattern reports every line it breaks, not just the first.
-
-**Lua bridge:** [`lupa`](https://pypi.org/project/lupa/) — an embedded Lua runtime inside Python. The suite loads the **shipped** `inctrack/parser.lua` and `inctrack/state.lua`, not a reimplementation. That is the whole point of the design: "a pass here means the shipped code behaves."
-
-**Config:** none. No `pytest.ini`, no `tox.ini`, no `requirements.txt` (the single dependency is documented in the module docstring and `README.md`).
-
-**CI:** none. Tests are run manually.
-
-## Run Commands
-
+**Run Commands:**
 ```bash
-pip install lupa
-
-python test/run_tests.py                              # unit suites only (5 of 8)
-python test/run_tests.py "C:\path\to\Ashita\chatlogs" # + replay of real chatlogs
+python test/run_tests.py                     # unit suites only
+python test/run_tests.py <chatlog_dir>       # + replay of real chatlogs
+INCURSION_CHATLOGS=<dir> python test/run_tests.py
+INCTRACK_LUA=luajit21 python test/run_tests.py <dir>   # pin the Lua backend
 ```
 
-**Environment variables** (both read in `test/run_tests.py`):
+Current full run (127 logs, 2,951,129 chat lines, character `Godwen`):
 
-| Var | Purpose | Fallback |
-|---|---|---|
-| `INCURSION_CHATLOGS` | Directory of Ashita chatlogs. Used when no positional argument is given. | `None` → replay suites skipped |
-| `INCURSION_ASHITA_LIBS` | Path to Ashita's `addons/libs` (for `json.lua`). | `<parent-of-logdir>/addons/libs` → else persistence suite skipped |
+```
+11 suite functions -> 13 result lines -> 13,461 checks -> PASS, 0 known defects
+```
 
-Resolution order, from `find_logs()` and `find_ashita_libs()`:
-1. `sys.argv[1]` → chatlog dir; else `os.environ["INCURSION_CHATLOGS"]`; else `None`.
-2. `os.environ["INCURSION_ASHITA_LIBS"]` → libs dir; else derived as `dirname(abspath(logdir))/addons/libs`; else `None`.
+| Result line | Checks | Needs |
+|---|---:|---|
+| `parser: structural lines all parse` | 11,819 | chatlogs |
+| `parser: generic tier matches nothing today` | 1 | chatlogs |
+| `parser: tightened patterns keep every line whole` | 1 | chatlogs |
+| `state: run reconstruction` | 888 | chatlogs |
+| `state: objectives, bonus, recovery` | 204 | — |
+| `adaptability: unseen content still tracked` | 119 | — |
+| `disconnect: stale progress is not trusted` | 23 | — |
+| `timers: countdown, linger, staleness` | 31 | — |
+| `persistence: json round trip` | 46 | Ashita `json.lua` |
+| `ui: helpers, layout contract, render` | 86 | — |
+| `addon: load, chat, settings, commands` | 220 | — |
+| `record: what the source and the docs say about themselves` | 17 | — |
+| `cost: the non-Incursion reject path` | 6 | — |
 
-Chatlogs are **never committed** — `.gitignore` excludes `chatlogs/` and `*.log` as personal and large.
+`test_parser` is one function returning **three** Results; every other suite
+returns one — that is why 11 functions print 13 lines. Both numbers are
+themselves asserted by the `record:` suite against this harness's docstring and
+against `docs/design.md`, because the arithmetic has been stated wrongly before.
+
+`state: run reconstruction` is 888 checks = 8 assertions × **111 completed
+runs** replayed out of the corpus.
+
+## Skips
+
+Skips are noted, never failed, and the run still reports `PASS`:
+- **Without chatlogs** (`find_logs`): the four `[logs]` lines above simply do
+  not run — `test_parser` and `test_replay` are never called, so the printed
+  report drops to 9 lines. `main()` prints
+  `chatlogs: none (pass a directory or set INCURSION_CHATLOGS ...)`.
+- **Without Ashita's `json.lua`** (`find_ashita_libs`, looked for at
+  `<Ashita>/addons/libs` beside the chatlogs or via `INCURSION_ASHITA_LIBS`):
+  `test_json_roundtrip` returns early with
+  `res.note("skipped: Ashita json.lua not found ...")` and 0 checks.
+- `test_addon_shell` notes and skips its CHANGELOG assertions when
+  `CHANGELOG.md` is absent.
+
+The known-defect guard holds identically with and without chatlogs, because the
+suites that carry defects always run.
 
 ## Test File Organization
 
-**Location:** one file, `test/run_tests.py`, at the repo root's `test/` directory. Tests are **not** co-located with source and are **not** written in Lua.
-
-**Naming:** suite functions are `test_<area>(...)` but are called explicitly from `main()`, not discovered.
-
-**Structure:**
-```
-test/run_tests.py
-├── module docstring          # usage, env vars, suite index
-├── helpers                   # find_logs, find_ashita_libs, make_lua, new_state,
-│                             #   clean, load_lines, feed, extra_of
-├── regex constants           # TS, MUST_PARSE, BEGIN, COMPLETE, POINTS, PHASE
-├── class Result              # check / note / report
-├── test_parser               # suites 1 + 2   [needs logs]
-├── test_replay               # suite 3        [needs logs]
-├── test_state_units          # suite 4
-├── test_future_content       # suite 5
-├── test_disconnect           # suite 6
-├── test_timers               # suite 7
-├── test_json_roundtrip       # suite 8        [needs Ashita libs]
-└── main                      # wiring + PASS/FAIL
-```
+Two files, no per-module test files. `test/run_tests.py` is the single entry
+point; `test/stubs.py` is imported and is never run directly (no CLI). Suites
+are numbered sections in file order, delimited by
+`# ----- \n# N. <title>` banners.
 
 ## Test Structure
 
-**Lua runtime bootstrap** — `make_lua()` in `test/run_tests.py`. Note the injected clock: `__clock` is a Lua global the tests move by hand, and `__clockfn` is what `State.new` receives, making every timer deterministic.
+Each suite is a plain function returning a `Result`; `main()` wraps every call
+in `run_suite`:
+
 ```python
-def make_lua():
-    lua = lupa.LuaRuntime()
-    lua.execute("package.path = [[%s\\?.lua;]] .. package.path" % ADDON.replace("\\", "\\\\"))
-    lua.execute("__clock = 0")
-    lua.execute("function __clockfn() return __clock end")
-    lua.execute("__parser = require('parser')")
-    lua.execute("__State  = require('state')")
+def test_timers(lua, parser, State):
+    res = Result("timers: countdown, linger, staleness")
+    res.check(cond, "message a human can act on")
+    res.note("context printed under the result line")
+    return res
 ```
 
-**State construction** — `new_state()` builds the Lua options table via `lua.table_from`:
+**`Result`** (`test/run_tests.py:684`) accumulates rather than aborts:
+- `check(cond, msg)` — counts a check; a false condition appends to `failures`.
+- `note(msg)` — prose printed under the result line (event kinds, corpus
+  shape, benchmark figures, skip reasons).
+- `xfail(cond, msg, defect)` — asserts behaviour the addon is *supposed* to
+  have, knowing a defect makes it false. Counts as a check. A false condition
+  is the expected failure (`xfails`); a condition that unexpectedly *holds*
+  lands in `fixed`, which is loud and red — a defect that stopped reproducing
+  before its own fix landed means the red line never proved anything.
+- `report()` prints `title / checks / status` and returns `not failures`, so an
+  expected failure still exits 0.
+
+**`EXPECTED_XFAILS = 0` and `EXPECTED_DEFECTS = set()`** — both currently
+empty. `main()` guards the *count* and the *set of defect ids* separately: a
+count alone cannot tell three defects from three different ones, so one fix
+landing plus one regression arriving would leave the total unchanged and the
+run green. The three defects this milestone opened on (FIX-01 bonus payout
+counted as a cleared phase, FIX-02 run clock not aged while unloaded, FIX-03
+the close button the window asks for and ignores) are fixed and are ordinary
+checks now. Any new `xfail` at all, or any regression re-reddening a fixed
+line, fails the run.
+
+**`run_suite`** turns a crash into a reported red suite rather than a traceback
+that takes every other suite's report and the guard down with it.
+
+## Runtimes: two of them, on purpose
+
+**`make_lua()`** (`test/run_tests.py:406`) — one shared runtime with
+`parser.lua` and `state.lua` loaded and an injected `__clockfn`. Eight suites
+share it. Pure Lua only; no host.
+
+**`make_host()` / `class Host`** (`test/run_tests.py:463`) — a **fresh, isolated
+lupa runtime per host**, with the recording ImGui stub and the Ashita host
+installed, so `ui.lua` (`short_cache`, `origin_x`) and `inctrack.lua` (one
+`incursion` table) get clean module state per scenario instead of the suite
+juggling `package.loaded`. Any scenario needing a pristine addon builds a new
+host: `render_case`, `edge_host`, `blank_host`, `close_host`, `shape_host`,
+`nf_host`, `loaded_host`, `bench_host`.
+
+`Host.addon` exposes the shell's file-scope locals (`incursion`, `visible`,
+`reset`, `persist`, `printf`, `now`, `MUST_SAVE`) resolved lazily over every
+registered handler plus the profile-switch callback.
+
+**Backend selection.** Which Lua sits behind lupa is not stable across installs
+(lupa 2.8 ships lua51..lua55, luajit20, luajit21; Ashita embeds LuaJIT 2.1).
+`lua_runtime()` honours `INCTRACK_LUA` and the resolved implementation is
+printed in the run header, so a mismatch is visible rather than inferred. This
+exists because the ui snapshots once depended on it — green on Lua 5.5 while six
+failed on LuaJIT, blaming `ui.lua` for a recorder formatting choice.
+`stubs.lua_type` dispatches on the proxy's own module for the same reason.
+
+## Reaching file-scope locals
+
+`lua_locals(host, fn)` (`test/run_tests.py:514`) walks upvalues transitively via
+`debug.getupvalue`, following function-valued ones with a `seen` set so a cycle
+cannot loop, and skipping `_ENV` so a global cannot be mistaken for a file-scope
+local. It is injected as the Lua chunk `__gsd_upvalues` and raises a clear error
+if `debug.getupvalue` is unavailable in the build.
+
 ```python
-State.new(lua.table_from({"clock": lua.eval("__clockfn"), "player": player}))
+L = lua_locals(host, ui.render)
+COLOR = L["COLOR"]        # also: clock_str, right_text, wrapped, bar, urgency,
+                          # replace_plain, shorten, STAT_SHORT, CONTENT_W, origin_x
 ```
 
-**Driving the code under test** — `feed()` is the universal fixture verb: raw chat strings in, parser and state exercised as in game.
-```python
-def feed(state, parser, lines):
-    for line in lines:
-        ev = parser.parse(line)
-        if ev is not None:
-            state.apply(state, ev)
-```
+This is what lets `ui.lua`'s helpers be unit-tested **without exporting them**
+— the addon's own convention forbids widening its surface for tests.
 
-**Calling Lua methods from Python.** lupa does not bind `self`, so every colon-method takes the object explicitly:
-```python
-run = s.snapshot(s)
-s.time_left(s)
-s2.restore(s2, s.serialise(s))
-```
-This is easy to get wrong when adding tests — always pass the receiver twice.
+## Mocking: the host, never the addon
 
-**Reading Lua values.** Lua tables come back as lupa proxies:
-- arrays: `list(run["boons"].values())`, `len(list(run["objective"]["mobs"].values()))`
-- numbers: wrap in `int(...)` before comparing (`int(run["points"]) == 84`)
-- booleans: wrap in `bool(...)` (`bool(run["finished"])`)
-- `extra_of(state)` normalises the generic-counter table into a plain `{label: (cur, max, done)}` dict.
+`test/stubs.py` supplies exactly the two hosts that do not exist outside the
+game.
 
-**Advancing time:**
-```python
-def tick(t):
-    lua.execute("__clock = %d" % t)
-```
-Suites reset with `lua.execute("__clock = 0")` before and after, since the runtime is shared across all suites.
+**`install_imgui(lua)` → `ImGuiRecorder`.** Every entry point `ui.lua` touches
+appends `{ name, n, args }` to a log and bumps a per-name counter. Recording is
+**strictly positional**: `n = select('#', ...)` is stored alongside `args`, so a
+trailing `nil` and an omitted argument are distinguishable and an overload the
+addon must not use cannot pass unnoticed (`imgui.Begin`'s `p_open` box is
+checked this way). Cursor bookkeeping is one number — enough to make
+`right_text`'s overflow branch reachable — and wrapping, real font metrics and
+window sizing are explicitly **not** simulated. `balance()` checks the ImGui
+stack is left even; `snapshot()` renders the recorded calls into the text
+window the ui suite diffs.
 
-## The Suites
+**One-shot fault injector.** `arm_fault(name, contains=None)` and
+`arm_lookup_fault(name)` arm exactly one raise, disarmed before raising so one
+arming produces one raise. Substring matching is plain-text `find(..., true)`,
+never a pattern — the substrings used contain a percent sign. For
+stack-moving calls (`Begin`, `End`, `PushStyleVar`, `PopStyleVar`) the raise
+happens *before* the call is logged: a refused push did not push, and logging
+the attempt would put a phantom into `balance()`'s arithmetic. `arm_lookup_fault`
+raises from the metatable `__index`, reproducing Ashita's constants-table
+lookup so the harness can prove the shell's `pcall(function () imgui.End() end)`
+closure shape is required.
 
-### 1. `test_parser` — "structural lines all parse" [needs chatlogs]
-Every real log line matching `MUST_PARSE` must produce a non-`nil` event. `MUST_PARSE` is an independent regex listing the known structural shapes (Begins/Complete/Phase/Bonus/Recovering, `New Objective: Defeat`, `(Boss: … at …)`, the minutes-remaining line, the points line, the boon line). Failure message includes file, line number, and the raw text. Notes the set of event kinds observed.
+**`install_ashita(lua)` → `AshitaHost`.** In-memory `addon`, `ashita.events`,
+`AshitaCore`, `chat`, `settings`, plus a pure-Lua `json`. Offers `fire`,
+`fire_text_in`, `saves`/`sessions`/`save_attempts`, `fail_saves`/`heal_saves`
+(to drive the retry path), `set_party_name`, `switch_profile`, `tick`/`wall` for
+the injected clocks, and opt-in `count_gsub`/`strip_colors_calls` counters.
 
-### 2. `test_parser` — "generic tier matches nothing today" [needs chatlogs]
-The inverse assertion, and the most interesting one in the suite: **any** event with `generic == true` fired against a real chatlog is a **failure**. The generic patterns exist only for content the server does not send yet; if one fires today, a specific pattern has regressed and the window has silently lost a progress bar or a coordinate.
+## Fixtures and Data
 
-### 3. `test_replay` — run reconstruction [needs chatlogs]
-Walks every log line once, driving the real state machine, and at each `Complete!` compares the machine's view against facts recomputed straight from the raw text with independent regexes (`BEGIN`, `PHASE`, `POINTS`, `COMPLETE`). Per run it asserts: instance name, total points, `phases_cleared == number of points events`, `finished`, `finish_time` present, final phase number — plus that a cleanly-observed run is **not** flagged `points_partial` and **not** flagged `desynced`.
+Real Ashita chatlogs are the primary fixture: `load_lines` reads
+`<Name>_YYYY.MM.DD.log`, `player_from_logs` takes the character off the
+filename, `clean` strips timestamps, and `at(path, text, lineno)` formats a
+console-safe location for every failure message. Unit suites use inline
+synthetic lines fed through `feed(state, parser, lines)` against `PLAYER =
+"Godwen"`.
 
-### 4. `test_state_units` — objectives, bonus, recovery
-Synthetic fixtures with the fixed player `Godwen`. Covers: instance/difficulty/phase/kill parsing; kills→boss objective switch (kills snap to max); boss location with a `(Map #N)` suffix surviving intact; all three bonus announcement forms (`kills`, `nm`, `chest`); bonus progress and completion; **only the player's own** points counted, not a party member's; `Recovering session...` preserving a live run of the same instance; a foreign instance message resetting a stale run; completion freezing `elapsed` to the server's reported time and keeping the window shown; boons — recognised only by the `(glyph): stats` tail, ordinary buffs (`gains the effect of Protect.`) ignored, other players' boons ignored, repeat picks deduped in place, and boons cleared by a new run.
+`test_replay` re-derives every expected fact **straight from the raw text**
+(`BEGIN`/`PHASE`/`POINTS`/`COMPLETE` regexes) and never from anything the state
+machine produced, then compares eight facts per completed run in `verify_run`.
 
-### 5. `test_future_content` — adaptability
-The suite that enforces the no-hardcoding rule. Invents content the server has never sent — instance `Castle Zvahl Baileys`, difficulty `Mythic`, `Phase #12`, a 40-kill cap, a 120-minute timer, an escort objective, counters `Seals Broken` and `Braziers Lit`, a brazier bonus, a bonus with no expiry at all — and asserts it is all still tracked, that multiple unknown counters coexist without collision, and that an unknown completion line applies to a previously seen counter. Also asserts single and doubled `[HH:MM:SS]` timestamp prefixes still parse, and — the negative case — that ordinary party chat merely mentioning "Incursion" (`LFM Palborough Mines Incursion 5@`, `!incursions`, item-obtained lines) never leaks into the window.
+## The `record:` suite
 
-### 6. `test_disconnect` — stale progress is never presented as current
-Builds a mid-phase-3 fixture, then reconnects. Asserts: reconnect sets `desynced` but keeps showing progress; the timer resyncs; a return at `Phase #5` infers 4 cleared phases, sets `points_partial`, drops the now-wrong boss preview, and flags the old mob list `stale`; a fresh objective announcement clears every flag; a same-phase reconnect is **not** treated as missed progress; returning after a boss kill clears the finished kill display; a bonus that lapsed while away is dropped rather than shown at 0:00, while a bonus that *completed* before expiring stays visible; and a `restore()` from disk is treated as a disconnect (`desynced` on the restored run).
+`test_record` (`test/run_tests.py:5724`) pins what the source and the docs say
+about themselves. Every check is of the form "the file says N and the file is
+M": the module header must name every function the module exports, the header's
+spelled-out function count must equal `len(parser.keys())`, the suite/result
+counts in this harness's own docstring and `docs/design.md` must match reality,
+and every quoted citation in the harness (≥20 of them, and that floor is itself
+checked) must still be findable in the file it names. Nothing greps for a
+phrase that must be absent — that check cannot tell a right answer from a
+differently wrong one, which is how a documentation defect survived being
+"fixed" once.
 
-### 7. `test_timers` — countdown, linger, staleness
-Countdown of `time_left` and `bonus_remaining`, `elapsed` advancing, snapping to a new sync, expiry clamping at 0 (never negative), the unrecognised-note 30s ageing-out, elapsed freezing on completion, the 30s linger window then hiding, a finished run past its linger refusing to absorb later points, `restore` rejecting a snapshot older than the 3-hour staleness window, and two back-to-back-run regressions (the entry timer sync arriving before `Begins!` must seed the *new* run's clock, both past the linger window and on an instant re-queue). Finally, a live bonus progress message reviving a bonus whose locally-estimated expiry had already lapsed.
+## The `cost:` benchmark
 
-### 8. `test_json_roundtrip` — persistence [needs Ashita libs]
-Loads Ashita's **real** `json.lua` via `dofile`, stubbing `T{}` with a passthrough since only encode/decode are exercised. Round-trips a fully populated run (objective + mob list, boss hint, bonus with expiry, generic counter, boon with a raw high-byte glyph, points, phase) and asserts every field survives, including that `bonus_remaining` and `time_left` match across the trip. Also asserts `restore` refuses a **finished** run (it would pop a stale "Complete!" window on next login), refuses a bad `version`, leaves no state behind when it refuses, and that `serialise` of an empty state is `nil`.
+`test_reject_cost` (`test/run_tests.py:6004`, PERF-04) runs last, because it is
+the only suite that reads a stopwatch and everything else has stopped competing
+for the machine by then. It times two shapes — the Phase 3 reject path copied
+into the harness at commit `a6a3577`, and the shipped one — over one fixed
+24-line corpus (18 colour-free, 6 coloured), 3,000 iterations a pass, best of 3,
+timed from Python because `os.clock`/`os.time` are stubbed inside the host.
 
-## Fixtures and Factories
-
-**Test data is raw chat text.** There are no object fixtures — every scenario is a list of strings fed through the real parser:
-```python
-s = new_state(lua, State)
-feed(s, parser, [
-    "You have 90 minutes remaining inside this Incursion.",
-    "Incursion [Fort Ghelsba] Begins! (Normal)",
-    "New Objective: Defeat 20 enemies (Orcish Grappler, Orcish Mesmerizer, Orcish Fodder)",
-    "(Boss: Orcish Martial at (G-6))",
-    "Incursion [Fort Ghelsba] Phase #1 7/20",
-])
-```
-Add new coverage by adding lines, not by constructing event tables — this keeps the parser in the loop.
-
-**Location:** inline in each suite function. Reusable scenarios are nested factory functions, e.g. `mid_phase()` inside `test_disconnect`.
-
-**Player name:** the constant `PLAYER = "Godwen"` for synthetic fixtures; the replay suites read the real character off the log filenames via `player_from_logs()` (`<Character>_YYYY.MM.DD.log`).
-
-**Log preprocessing:** `clean()` strips the one-or-two `[HH:MM:SS] ` prefixes a timestamp plugin adds (`TS` regex) plus trailing newlines. `load_lines()` returns `(basename, lineno, text)` triples so failures are locatable.
-
-## What Is Skipped, and When
-
-The suite **skips rather than fails** when its optional inputs are missing:
-
-| Missing | Effect |
-|---|---|
-| Chatlog directory (no argv, no `INCURSION_CHATLOGS`) | Suites 1, 2, 3 not run. `main()` prints `chatlogs: none (pass a directory or set INCURSION_CHATLOGS to replay real runs)`. Overall result can still be `PASS`. |
-| `json.lua` not found at the libs path | Suite 8 runs with zero checks and notes `skipped: Ashita json.lua not found (set INCURSION_ASHITA_LIBS)`. |
-| `*.log` files absent from a directory that *was* supplied | Hard `SystemExit("no *.log files found in %s")` — an explicitly given path that is wrong is an error, not a skip. |
-| `lupa` not installed | Hard `ImportError` at module import. There is no graceful degradation; the suite cannot run at all. |
-
-**Consequence:** a bare `python test/run_tests.py` on a machine with no logs and no Ashita install prints `PASS` while exercising only 5 of 8 suites. Treat a green run without the `chatlogs:` header line as partial.
-
-## Coverage Gaps
-
-**`inctrack/ui.lua` (433 lines) — completely untested.** It requires `imgui`, which only exists inside Ashita. Every layout decision, colour rule, bar computation, `clock_str` formatting, right-alignment against `CONTENT_W`, and the close-button → manual-hide path is verified only by running the addon in game. This is the largest gap by far.
-
-**`inctrack/inctrack.lua` (301 lines) — completely untested.** It requires `addon`, `ashita.events`, `AshitaCore`, `settings`, `common`, and `chat`. Untested behaviour includes:
-- the `text_in` pcall boundary and its error path
-- the `MUST_SAVE` / 5-second save throttle in `persist()`
-- load-time session resume and the "Resumed run in %s" path
-- player-name resolution from `GetParty():GetMemberName(0)`, including the deferred fetch when the name is unavailable at load
-- the `/incursion` command dispatch (`reset`, `lock`, `auto`, bare toggle, usage) and `e.blocked`
-- the `visible()` override-vs-auto logic
-- the `settings.register` profile-switch handler (character change clearing run + player name + loading the new profile's session)
-
-**Other gaps:**
-- No test asserts the addon never mutates or blocks `e.message` — that guarantee is comment-enforced only.
-- `strip_colors()` is an Ashita string extension; colour-coded input is never exercised, only pre-stripped text.
-- Replay suites depend on **personal, uncommitted** chatlogs, so suites 1–3 are unreproducible for any other contributor and cannot gate a PR.
-- No CI, so nothing runs the suite automatically; regressions surface only when someone runs it by hand.
-- No coverage measurement of any kind for the Lua modules.
-- Concurrency/ordering hazards from Ashita's event loop (`text_in` and `d3d_present` interleaving) are outside the harness entirely.
+It asserts *counters*, not wall time: per colour-free rejected line the old
+shape costs 1.00 `strip_colors` + 4.33 `gsub` and the new one 0.00 + 0.00.
+Counters and stopwatch never share a host (the counter is a Lua function in
+front of a C one). The rate figures and the recorded baseline are printed as
+**provenance, not a threshold**, along with a note that the 3.45x ratio is a
+property of this corpus's colour mix — Ashita's log writer strips marker bytes,
+so the player's real mix is not measurable here.
 
 ## Common Patterns
 
-**Time-dependent testing** — move the injected clock, never sleep:
+**Fault injection round trip:**
 ```python
-tick(0)
-feed(s, parser, ["Incursion [Fort Ghelsba] Begins! (Normal)",
-                 "Bonus Objective: Defeat 5 Sentry Lizard! (Expires in 10 Minutes)"])
-res.check(int(s.bonus_remaining(s)) == 600, "bonus expiry not seeded")
-tick(700)
-res.check(s.bonus(s) is None, "expired bonus still displayed")
-tick(0)   # leave the shared clock where the next suite expects it
+host = make_host()
+host.imgui.arm_fault("TextColored", contains="%")
+host.fire("d3d_present")
+# assert: render_off latched, stack balanced, one printed report, one only
 ```
 
-**Negative assertions carry equal weight.** Much of the value is in what must *not* happen — the generic tier must stay dormant, ordinary chat must not leak in, a clean run must not be flagged partial, a stale finished run must not absorb points, `restore` must not resume a finished or corrupt snapshot.
+**Save policy — every save asserted twice:** nothing written on the chat line
+that delivered the event, then written on the next frame. The unload handler is
+asserted to write unconditionally.
 
-**Failure messages name the symptom in user terms**, not the assertion: `"kept showing kill progress after the phase's boss died"`, `"ordinary chat mentioning Incursion leaked into the window"`. Match this style — it is how a failure is diagnosed without reading the test.
+## What remains uncovered
 
-**Reporting:** `Result.report()` prints a fixed-width line per suite with the check count, then notes, then up to 10 failures and a `... N more` tail. `main()` ANDs every suite and prints `PASS` or `FAIL`.
+- **No CI, no linter, no build step** — deliberate, deferred as v2 requirements
+  PROC-01…04. The suite runs only when a human runs it.
+- **Real ImGui layout**: wrapping, font metrics and window sizing are not
+  simulated, so the window snapshots pin structure and text, not pixels.
+- **The real Ashita host**: `settings.save()`, the GUI manager, and the game
+  thread are stubs. The stack-repair path on a genuine over-pop is a C++
+  assert no `pcall` reaches — stated in `inctrack/inctrack.lua`, provoked by no
+  test.
+- **The locked-path flags arithmetic** raising before `Begin` on a host where an
+  unlocked frame has already drawn clean: nothing data-driven reaches it and no
+  test provokes it.
+- **The residual write window**: the run is not on disk between a chat line and
+  the next `d3d_present`. Bounded by "the next frame", which a minimised client
+  can stretch arbitrarily. Stated, not tested.
+- **Line families absent from the corpus** are flagged by the parser suite
+  itself (`no <kind> line in this corpus -- that family is unguarded`) rather
+  than silently passing.
+- **LuaJIT 2.1, the dialect Ashita ships**, is only exercised when a contributor
+  sets `INCTRACK_LUA=luajit21`; the default run uses whatever lupa resolved.
 
 ---
 
-*Testing analysis: 2026-08-28*
+*Testing analysis: 2026-08-29*

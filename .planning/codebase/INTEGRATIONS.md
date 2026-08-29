@@ -1,141 +1,195 @@
 # External Integrations
 
-**Analysis Date:** 2026-08-28
+**Analysis Date:** 2026-08-29
 
-There are **no network integrations**. The addon opens no sockets, calls no HTTP
-API, and inspects no packets or process memory beyond one Ashita accessor. Its
-two "external" surfaces are the **Ashita v4 addon API** and the **CatsEyeXI
-server's chat message stream**.
+The addon integrates with exactly one thing: the Ashita v4 host process, and
+through it the CatsEyeXI server's chat stream. There is no network client, no
+HTTP, no database, no telemetry, and no third-party service of any kind.
 
 ## APIs & External Services
 
-### Ashita v4 addon API — the entire host surface
+### Ashita v4 addon API
 
-**Addon metadata (globals set by the host, populated at load):**
-- `inctrack/inctrack.lua:20-24` — `addon.name`, `addon.author`, `addon.version` (`1.1.0`), `addon.link`, `addon.desc`
+**Event registrations** — all in `inctrack/inctrack.lua`:
 
-**Ashita libraries required (`inctrack/inctrack.lua:26-32`):**
+| Event | Alias | Line | What it does |
+|-------|-------|------|--------------|
+| `load` | `incursion_load` | ~225 | Prints the version banner, fetches the player name, resumes a saved run. |
+| `unload` | `incursion_unload` | ~253 | Clears `save_due` and calls `persist()` unconditionally — the one path that cannot wait for a frame. |
+| `text_in` | `incursion_text_in` | ~268 | The whole ingest path. Read-only: the message is never modified and `e.blocked` is never set here. Wrapped in `pcall`. |
+| `d3d_present` | `incursion_present` | ~370 | Per-frame. Performs the deferred settings write (above both early returns), then calls `ui.render` inside a `pcall`. |
+| `command` | `incursion_command` | ~543 | Handles `/incursion` and `/inc`; sets `e.blocked = true` on a match. |
 
-| Library | Where | Used for |
-|---|---|---|
-| `common` | `inctrack/inctrack.lua:26` | `T{}` tables; the `string:strip_colors()` extension |
-| `chat` | `inctrack/inctrack.lua:28` | `chat.header(name)` + `chat.message(text)` in `printf()` (`inctrack/inctrack.lua:57`) |
-| `settings` | `inctrack/inctrack.lua:29` | `settings.load()`, `settings.save()`, `settings.register()` |
-| `json` | `inctrack/inctrack.lua:30` | `json.encode` / `json.decode` of the session blob |
-| `imgui` | `inctrack/ui.lua:28` | The whole window |
+**`AshitaCore` calls** — one, used twice:
 
-**`ashita.events.register(event, alias, fn)` — four handlers, all in `inctrack/inctrack.lua`:**
+- `AshitaCore:GetMemoryManager():GetParty():GetMemberName(0)` —
+  `inctrack/inctrack.lua` ~230 (load handler) and ~296 (deferred re-fetch inside
+  `text_in`, because the name is not always available at load time when logging
+  in with the addon already active).
+- `AshitaCore:GetGuiManager()` is never called by name from addon code; it is
+  reached implicitly as the `__index` of the `imgui` table (see below).
 
-| Event | Alias | Line | Responsibility |
-|---|---|---|---|
-| `load` | `incursion_load` | `inctrack/inctrack.lua:110` | Print the identifying banner, read the player name, restore a saved run |
-| `unload` | `incursion_unload` | `inctrack/inctrack.lua:137` | `persist()` the run to settings |
-| `text_in` | `incursion_text_in` | `inctrack/inctrack.lua:147` | The data feed. Read-only; wrapped in `pcall` so a parse failure can never take the chat handler down. Never sets `e.blocked` and never mutates `e.message` |
-| `d3d_present` | `incursion_present` | `inctrack/inctrack.lua:187` | Per-frame render via `ui.render()`; a close click sets the manual override |
-| `command` | `incursion_command` | `inctrack/inctrack.lua:204` | `/incursion` and `/inc`; sets `e.blocked = true` on match |
+**Stock libraries required** — `inctrack/inctrack.lua` ~26-37:
 
-**`text_in` event shape used:** only `e.message` is read (`inctrack/inctrack.lua:149`). It is passed through `line:strip_colors()` before parsing because the parser patterns are `^`-anchored and colour codes would defeat them.
+| Module | Use |
+|--------|-----|
+| `common` | Required for side effects only (the `T{}` prelude constructor used by `default_settings` and `incursion`). |
+| `chat` | `chat.header(addon.name)` + `chat.message(...)` inside `printf` (~120). Every player-facing line goes through it. |
+| `settings` | `settings.load(default_settings)` (~50), `settings.save()` (~143, 169, 245, 598, 606, 660), and `settings.register('settings', 'incursion_settings_update', ...)` (~624) for the character-profile switch. |
+| `json` | `pcall(json.encode, blob)` in `persist()` (~141) and `pcall(json.decode, saved)` in `resume()` (~198). Both always protected — the decoded *shape* is then validated separately in `State:restore` (`inctrack/state.lua` ~632). |
+| `imgui` | The HUD. Required in both `inctrack/inctrack.lua` ~37 and `inctrack/ui.lua` ~73; both handles are the same table through `package.loaded`. |
 
-**`command` event shape used:** `e.command:args()` (Ashita's tokenizer), then `args[1]:lower()` for the command and `args[2]:lower()` for the subcommand — so commands are case-insensitive (`inctrack/inctrack.lua:205-212`).
+**Sugar string methods** (Ashita's `addons/libs/sugar/string.lua`, installed onto
+the `string` metatable by the host):
 
-**`AshitaCore` memory manager — the single memory read:**
-- `AshitaCore:GetMemoryManager():GetParty():GetMemberName(0)` — the local player's name
-- Called at `inctrack/inctrack.lua:114` (load) and again lazily at `inctrack/inctrack.lua:161` inside `text_in`, because the name is not available at load time when the addon is already active during login
-- Needed to filter `<name> gains N incursion points.` and boon messages to the local character only
+- `string:strip_colors()` — called once per relevant line at
+  `inctrack/inctrack.lua` ~286. The host implementation removes **three** marker
+  bytes — `0x1E`, `0x1F`, `0x7F` — each followed by one payload byte, in a
+  **single** gsub with a character class:
 
-**ImGui bindings (`inctrack/ui.lua`) — the complete call surface:**
-- Window: `imgui.Begin('inctrack###incursion_window', ARG_OPEN, flags)` / `imgui.End()` (`inctrack/ui.lua:407,422`)
-- Flags: `ImGuiWindowFlags_NoFocusOnAppearing`, `AlwaysAutoResize`, `NoScrollbar`, `NoTitleBar`, plus `NoMove` when locked (`inctrack/ui.lua:396-402`)
-- Style: `imgui.PushStyleVar(ImGuiStyleVar_ItemSpacing, {4,2})` / `PopStyleVar`; `imgui.PushStyleColor(ImGuiCol_PlotHistogram, color)` / `PopStyleColor` around each bar (`inctrack/ui.lua:116-118`)
-- Text: `imgui.TextColored`, `imgui.SameLine`, `imgui.CalcTextSize`, `imgui.GetCursorPosX`, `imgui.SetCursorPosX`, `imgui.PushTextWrapPos` / `PopTextWrapPos`
-- Widgets: `imgui.ProgressBar(fraction, size, overlay)`, `imgui.Dummy(size)` (the invisible spacer that pins content width to `CONTENT_W = 300`, `inctrack/ui.lua:63,409`)
-- Per-frame argument tables are hoisted to module locals (`ARG_SPACER`, `ARG_BAR_MAIN`, `ARG_BAR_THIN`, `ARG_OPEN`, `ARG_PAD_TIGHT`, `inctrack/ui.lua:71-75`) to avoid GC churn at 60fps
+  ```lua
+  -- addons/libs/sugar/string.lua, string_mt.strip_colors
+  return (self:gsub('[' .. string.char(0x1E, 0x1F, 0x7F) .. '].', ''));
+  ```
 
-### CatsEyeXI server — the chat message stream
+  Both the byte set and the gsub count are load-bearing. The set is what
+  `parser.relevant`'s unconditional-yes fall-through must be a superset of
+  (`inctrack/parser.lua` ~426-431 searches `\30`, `\31`, `\127`); a gate that
+  models only two of the three would silently drop every `0x7F`-coded line. The
+  count feeds the PERF-04 reject-cost figures — the stub in `test/stubs.py` ~897
+  did two gsubs where the host does one until Phase 4's review, which inflated the
+  recorded baseline.
+- `string:args()` — `e.command:args()` in the command handler (~544).
+- `string:lower()`, `string:find`, `string:gsub`, `string:byte` are plain Lua.
 
-The server is the sole data source, consumed one-way through `text_in`. Nothing is ever sent back. `inctrack/parser.lua` translates lines to event tables; `docs/design.md:25-41` holds the full message table.
+**Clock:** Ashita exposes no monotonic clock to addons, so `now()`
+(`inctrack/inctrack.lua` ~130) uses `os.clock` — on Windows this is wall time since
+process start with sub-second resolution. `os.time()` is used separately for
+`saved_at` and the staleness check (`inctrack/state.lua` ~598, ~906). Two clocks
+with different epochs, deliberately, and both stubbed independently in the harness.
 
-**Prefilter** (`inctrack/parser.lua:303`) — chat volume in a party is high, so a line is rejected cheaply unless it starts with `Incursion [`, `New Objective: `, `Bonus Objective: `, `(Boss: `, `You have <digit>`, or ends with `incursion points.`, or contains the `): ` boon tail. Leading `[HH:MM:SS] ` timestamp prefixes (a timestamp plugin may add doubled stamps) are stripped in a loop first (`inctrack/parser.lua:289`).
+### ImGui bindings
 
-**Specific message contracts consumed:**
+`imgui` resolves through Ashita's `addons/libs/imgui.lua`. **There is no Lua-side
+wrapper**: that file is a constants table whose `__index` is
+`AshitaCore:GetGuiManager()`, so every call reaches the C++ binding's signature
+unmediated (documented at `inctrack/ui.lua` ~505-512). Consequences the code
+depends on:
 
-| Server message | Event |
-|---|---|
-| `You have 90 minutes remaining inside this Incursion.` | `time` — timer sync, whole minutes only, arrives *before* `Begins!` |
-| `Incursion [Fort Ghelsba] Begins! (Normal)` | `begin` |
-| `Incursion [Giddeus] Recovering session...` | `recover` — **re-syncs only the timer**; objective, phase, boss and boons are never re-announced |
-| `Incursion [X] Complete! (Normal) Time: 48m 44s` | `complete` |
-| `Incursion [X] Phase #3 12/15` | `phase` |
-| `New Objective: Defeat 20 enemies (A, B, C)` | `objective_kills` |
-| `New Objective: Defeat <NM> at (G-6)!` | `objective_boss` |
-| `(Boss: <NM> at (G-6))` | `boss_hint` |
-| `Bonus Objective: Defeat 5 <mob>! (Expires in 10 Minutes)` | `bonus_new` kind `kills` |
-| `Bonus Objective: Defeat <NM> at (H-9)! (Expires in 10 Minutes)` | `bonus_new` kind `nm` |
-| `Bonus Objective: Find the hidden chest! (Expires in 10 Minutes)` | `bonus_new` kind `chest` |
-| `Incursion [X] Bonus Objective: <mob> 2/5` | `bonus_progress` |
-| `Incursion [X] Bonus Objective Complete!` | `bonus_done` |
-| `<name> gains 84 incursion points.` | `points` — one per phase; the count equals phases cleared |
-| `<name> gains the effect of <Boon> (<glyph>): <stats>` | `boon` — the `(glyph): stats` tail is what distinguishes it from an ordinary buff |
+- `imgui.Begin(name, p_open, flags)` is declared once and positionally
+  (`plugins/sdk/imgui.h:305`), so flags must go in slot 3 and `p_open` must be an
+  explicit `nil` — `inctrack/ui.lua` ~513. Passing `nil` asks for no close control
+  at all, which is right for a window drawn without a title bar.
+- `pcall(imgui.End)` would read `imgui.End` through `__index` *before* `pcall` is
+  entered, so an error escapes the handler. The shell's stack repair therefore
+  wraps each call in a closure: `pcall(function () imgui.End(); end)` and
+  `pcall(function () imgui.PopStyleVar(1); end)` — `inctrack/inctrack.lua` ~514-524.
 
-**Generic (forward-compatibility) tier** — tried only after every specific matcher declines, so it can never shadow one (`inctrack/parser.lua:214-250`): `New Objective: <anything>` → `objective_text`; `Incursion [X] <label> N/M` → `generic_counter`; `Incursion [X] <label> Complete!` → `generic_done`; `Bonus Objective: <anything>` → `bonus_new` kind `text`; `Incursion [X] <anything else>` → `generic_note`. No instance, boss, mob, objective or difficulty name is hardcoded anywhere, so new content appears without a code change. The test suite asserts this tier matches **nothing** in current chatlogs — a generic firing on a real line means a specific pattern has regressed.
+**Functions used** (all from `inctrack/ui.lua` except the repair pair):
+`Begin`, `End`, `CalcTextSize`, `Dummy`, `GetCursorPosX`, `SetCursorPosX`,
+`SameLine`, `TextColored`, `ProgressBar`, `PushStyleColor`, `PopStyleColor`,
+`PushStyleVar`, `PopStyleVar`, `PushTextWrapPos`, `PopTextWrapPos`.
+
+**Enum globals read** (set by the host, stubbed by the harness):
+`ImGuiCol_PlotHistogram`, `ImGuiStyleVar_ItemSpacing`,
+`ImGuiWindowFlags_AlwaysAutoResize`, `ImGuiWindowFlags_NoScrollbar`,
+`ImGuiWindowFlags_NoTitleBar`, `ImGuiWindowFlags_NoFocusOnAppearing`,
+`ImGuiWindowFlags_NoMove`.
+
+### CatsEyeXI chat message stream
+
+The server's own chat text is the addon's only data source — no packets, no
+memory reads. `parser.relevant` (`inctrack/parser.lua` ~426) is the cheap gate run
+on the **raw** message before any allocation, because `text_in` fires on every
+line the client receives and over 127 real logs 97.5% of them are not ours. It
+uses `string.find(..., 1, true)` (plain, index-returning, never allocating) and
+answers in two rules:
+
+1. Unconditional yes for any line carrying a colour marker byte (`\30`, `\31`,
+   `\127`) — a payload byte can land inside a needle, so such a line is one the
+   gate is not entitled to judge.
+2. Otherwise yes when the line holds any of seven literal needles, each a
+   substring the corresponding matcher's pattern cannot match without, under every
+   alternation and optional group:
+   - `Incursion [`
+   - `New Objective: `
+   - `Bonus Objective: `
+   - `(Boss: `
+   - `remaining inside this Incursion` — begins after the optional plural, because
+     the one-minute warning sends "1 minute remaining"
+   - `incursion points.`
+   - `gains the effect of ` — the loosest; boons carry no other anchor, so every
+     ordinary buff line pays one wasted colour strip and is then turned away by
+     the anchored rejection in `parser.parse`.
+
+`parser.parse` re-asks the same question so the module is safe standalone, trims,
+and strips any number of `[HH:MM:SS] ` timestamp prefixes (a timestamp plugin may
+be active; the chatlogs show doubled stamps) before its `^`-anchored patterns run.
 
 ## Data Storage
 
-**Databases:**
-- None.
+**Databases:** None.
 
-**File Storage:**
-- Ashita's per-character settings file, written next to the addon. Accessed only via the `settings` library, never by path
-- The run is stored as `settings.session`: a single JSON **string** produced by `state:serialise()` (`inctrack/state.lua:528`) and `json.encode` in `persist()` (`inctrack/inctrack.lua:82`). A flat string, not a nested table, so the settings merge cannot reshape it on the way back in
-- Restore is defensive: `pcall(json.decode, ...)` plus a `type(blob) == 'table'` check plus `state:restore(blob)` returning true; anything corrupt or stale is discarded wholesale rather than half-applied (`inctrack/inctrack.lua:122-133`). `state.lua:597` additionally drops blobs older than `STALE_SECONDS` using the `saved_at = os.time()` stamp written at `inctrack/state.lua:554`
+**File storage:** Ashita's per-character settings file, written by
+`settings.save()`. The in-progress run lives there as `settings.session`, a JSON
+string produced by `State:serialise()` + `json.encode`. Nothing else is written.
+Writes are deferred to the `d3d_present` handler (Ashita exposes no asynchronous
+write, and `settings.save()` is a synchronous disk write that must not run on the
+chat thread); failures re-arm behind a 5-second retry window
+(`SAVE_RETRY_SECONDS`, `inctrack/inctrack.lua` ~100).
 
-**Write policy:**
-- `MUST_SAVE` (`inctrack/inctrack.lua:64`) lists events the server will never repeat — `begin`, `recover`, `complete`, `objective_kills`, `objective_boss`, `objective_text`, `boss_hint`, `bonus_new`, `bonus_done`, `generic_done`, `boon` — and forces an immediate disk write
-- Everything else (kill counts, which arrive constantly and are cheap to lose) is throttled to one write per 5 seconds via `incursion.save_at` (`inctrack/inctrack.lua:176`)
-
-**Caching:**
-- None.
+**Caching:** In-memory only — `ui.forget()` clears the memoised boon shorthand on
+reset and on character switch.
 
 ## Authentication & Identity
 
-**Auth Provider:**
-- None. Identity is the FFXI character name read from `GetMemberName(0)`, used purely to filter the local player's `points` and `boon` messages
-- `settings.register('settings', 'incursion_settings_update', ...)` (`inctrack/inctrack.lua:279`) fires when Ashita switches character profiles (login, logout, character change). The handler resets the run, clears the cached player name to `nil` so the next `text_in` re-fetches it, and attempts to restore the new profile's own saved run — keeping the old name would silently filter out the new character's points messages
+- No auth. Identity is the FFXI character name from
+  `GetParty():GetMemberName(0)`, used to filter the player's own points messages.
+- Character changes arrive through the `settings` profile-switch callback
+  (`settings.register`, ~624), which resets the run, clears `render_off` /
+  `parse_told` / `save_told` / `save_due` / `save_retry_at`, calls `ui.forget()`,
+  and sets the player name back to `nil` so `text_in` re-fetches it.
 
 ## Monitoring & Observability
 
-**Error Tracking:**
-- None external. The `text_in` handler wraps everything in `pcall` and prints `parse error: <err>` to the game console on failure (`inctrack/inctrack.lua:182`)
+**Error tracking:** None external. Three "say it once" latches print a single
+chat line per session and then go quiet: `render_off` (render raised inside
+`d3d_present`), `parse_told` (chat handler's `pcall` returned false), `save_told`
+(a write raised out of `persist()`). All three are cleared by `/incursion reset`
+and by a character change; `render_off` is additionally cleared by bare
+`/incursion`.
 
-**Logs:**
-- Chat-console output only, via `printf()` → `chat.header`/`chat.message`. A load banner identifies the build and author explicitly so it is not mistaken for another Incursion addon (`inctrack/inctrack.lua:112`)
-- Ashita's own chatlog files are consumed *by the test harness* as replay input; the addon never writes them
+**Logs:** Player-facing chat lines only, via `printf` →
+`chat.header`/`chat.message` → `print`. The test harness captures `print` into
+`__host_chat` rather than writing stdout.
 
 ## CI/CD & Deployment
 
-**Hosting:**
-- Not applicable. Distribution is a git clone or release download copied into `<Ashita>\addons\inctrack\`
+**Hosting:** None. Distribution is GitHub
+(`https://github.com/watahero/inctrack`, `addon.link`) — release download or
+`git clone`, then a folder copy into the Ashita addons directory.
 
-**CI Pipeline:**
-- None. No `.github/` directory exists. Tests are run manually: `python test/run_tests.py`
+**CI pipeline:** None. No `.github/workflows`, no CI config of any kind. The
+suite is run manually: `python test/run_tests.py [chatlog_dir]`.
 
 ## Environment Configuration
 
-**Required env vars:**
-- None for the addon.
-- Test-only, both optional: `INCURSION_CHATLOGS`, `INCURSION_ASHITA_LIBS`
+**Required env vars:** None at runtime. The harness optionally reads
+`INCTRACK_LUA`, `INCURSION_CHATLOGS`, `INCURSION_ASHITA_LIBS` — see
+`.planning/codebase/STACK.md`.
 
-**Secrets location:**
-- None exist. The addon handles no credentials and makes no outbound requests
+**Secrets location:** No secrets exist in this project. `chatlogs/` and `*.log`
+are gitignored as personal data, not as credentials.
 
 ## Webhooks & Callbacks
 
-**Incoming:**
-- None (HTTP). The Ashita event callbacks listed above are the only inbound surface
+**Incoming:** None (network). Host callbacks: the five `ashita.events`
+registrations plus the `settings.register` profile-switch callback.
 
-**Outgoing:**
-- None. The addon transmits nothing — no packets, no telemetry, no chat commands sent to the server
+**Outgoing:** None. The addon never sends anything to the server; it does not
+even echo to chat except through `print`, and it blocks only its own
+`/incursion` / `/inc` commands.
 
 ---
 
-*Integration audit: 2026-08-28*
+*Integration audit: 2026-08-29*

@@ -1,127 +1,126 @@
 # Codebase Structure
 
-**Analysis Date:** 2026-08-28
+**Analysis Date:** 2026-08-29
 
 ## Directory Layout
 
 ```
 inctrack/
-├── inctrack/           # The shippable addon folder — copies to <Ashita>\addons\inctrack\
-│   ├── inctrack.lua    # Entry point; folder name must match addon.name
-│   ├── parser.lua      # Chat line -> event (pure)
-│   ├── state.lua       # Event -> run record (pure)
-│   └── ui.lua          # Run record -> ImGui
-├── docs/
-│   └── design.md       # Message-stream ground truth and intended design
+├── inctrack/            # The shipped addon — the only directory Ashita loads
+│   ├── inctrack.lua     # Addon shell: Ashita events, settings, commands (661 lines)
+│   ├── parser.lua       # Pure chat-line parser (512 lines)
+│   ├── state.lua        # Pure run state machine + persistence (1048 lines)
+│   └── ui.lua           # Read-only ImGui window (535 lines)
 ├── test/
-│   └── run_tests.py    # Python + lupa harness; loads the real Lua modules
-├── .gitattributes      # text=auto; LF enforced for .lua/.py/.md
-├── .gitignore          # Excludes chatlogs, *.log, config/, settings/
-├── CHANGELOG.md
-├── LICENSE             # MIT
-└── README.md           # Install and usage
+│   ├── run_tests.py     # The entire suite, single entry point (6255 lines)
+│   └── stubs.py         # Ashita + ImGui host stubs (1504 lines)
+├── docs/
+│   └── design.md        # Design rationale, kept in step with the source (699 lines)
+├── .planning/           # GSD planning artifacts (milestones, roadmap, this map)
+├── .claude/             # CLAUDE.md project instructions, local settings
+├── README.md            # Install and usage
+├── CHANGELOG.md         # Keep-a-Changelog format, current at v1.2.0
+├── LICENSE              # MIT
+├── .gitattributes       # LF enforced for .lua/.py/.md
+└── .gitignore           # excludes chatlogs/, *.log, config/, settings/, __pycache__/
 ```
-
-Four Lua files, one Python file, four Markdown files. No build step, no package manifest, no lockfile, no dependency directory.
 
 ## Directory Purposes
 
-**`inctrack/` (inner):**
-- Purpose: the complete deployable addon; nothing outside it is installed
-- Contains: only Lua modules
-- Key files: `inctrack.lua`, `parser.lua`, `state.lua`, `ui.lua`
-- Constraint: Ashita v4 resolves `require('parser')` relative to the addon folder, so all modules must be flat siblings of `inctrack.lua`. There are no subdirectories here and adding one would need explicit path handling.
+**`inctrack/`:**
+- Purpose: the addon as Ashita loads it — this directory is what gets copied into `<Ashita>/addons/inctrack/`
+- Contains: four Lua modules, nothing else. No subdirectories, no vendored libraries
+- Key files: `inctrack.lua` is the entry point Ashita executes; the other three are `require`d by name
 
 **`test/`:**
-- Purpose: the entire test suite, in one file
-- Contains: `run_tests.py` — eight suites driving the shipped Lua through `lupa`
-- Inputs: a chatlog directory (argv[1] or `INCURSION_CHATLOGS`) and Ashita's `addons/libs` (`INCURSION_ASHITA_LIBS`); log-backed suites skip when absent
+- Purpose: the whole verification story
+- Contains: `run_tests.py` (eleven suite functions printing thirteen result lines) and `stubs.py`
+- Key files: `test/run_tests.py` is the only entry point; `test/stubs.py` is imported by it and has no CLI
 
 **`docs/`:**
-- Purpose: design record, including the verified message-stream table that is the project's ground truth
-- Contains: `design.md` only
+- Purpose: the "why", separate from the source's line-level "why"
+- Key file: `docs/design.md` — rewritten from the source during v1.2.0 and currently accurate
+
+**`.planning/`:**
+- Purpose: GSD workflow state — `PROJECT.md`, `ROADMAP.md`, `STATE.md`, `MILESTONES.md`, `WINDOWS.md`, `milestones/` (per-milestone requirements, roadmap, audit and phase directories), `codebase/` (this map)
+- Not shipped, not loaded by anything
 
 ## Key File Locations
 
 **Entry Points:**
-- `inctrack/inctrack.lua`: sets `addon.name/author/version/link/desc`, registers `load`, `unload`, `text_in`, `d3d_present`, `command`, plus a `settings.register` profile-change callback
-- `test/run_tests.py`: `main()` at the bottom, guarded by `if __name__ == "__main__"`
+- `inctrack/inctrack.lua`: Ashita loads this; all five event handlers and the settings profile callback live here
+- `test/run_tests.py`: `python test/run_tests.py [chatlog_dir]`
 
 **Configuration:**
-- `inctrack/inctrack.lua` `default_settings` (`auto`, `locked`, `session`) — the only configuration surface; Ashita writes the per-character profile itself
-- `.gitignore`: `config/` and `settings/` are Ashita's own per-character output when the addon runs from a checkout, and are never committed
+- `default_settings` table at the top of `inctrack/inctrack.lua` (`auto`, `locked`, `session`) — there is no config file in the repo; Ashita writes per-character settings at runtime and `.gitignore` excludes `config/` and `settings/`
+- `.gitattributes`: LF line endings for all source types
+- Environment variables read by the suite: `INCURSION_CHATLOGS`, `INCURSION_ASHITA_LIBS`
 
 **Core Logic:**
-- `inctrack/parser.lua`: the `specific` and `generic` matcher arrays and `parser.parse`
-- `inctrack/state.lua`: `new_run`, `State:apply`, the derived accessors, `serialise`/`restore`
+- `inctrack/parser.lua`: `parser.relevant`, `parser.parse`, the `specific` and `generic` matcher arrays
+- `inctrack/state.lua`: `State:apply` (event dispatch), `State:serialise` / `State:restore`, the structural validator block, timer accessors
+- `inctrack/ui.lua`: `ui.render`, `ui.forget`, `draw_*` helpers, `COLOR`, `STAT_SHORT`, `short_cache`
 
 **Testing:**
-- `test/run_tests.py`: `test_parser`, `test_replay`, `test_state_units`, `test_future_content`, `test_disconnect`, `test_timers`, `test_json_roundtrip`
+- `test/run_tests.py`: all suites
+- `test/stubs.py`: `install_imgui(lua)` → `ImGuiRecorder`; `install_ashita(lua, player, profile)` → `AshitaHost`. Also `IMGUI_CHUNK`, `ASHITA_CHUNK`, `JSON_CHUNK`, `GSUB_COUNTER_CHUNK` (Lua source embedded as Python strings), `WINDOW_FLAGS`, `MEASUREMENT_CALLS`, `TEXT_IN_FIELDS`
 
 ## Naming Conventions
 
 **Files:**
-- Lowercase single-word `.lua` per module; the module file name is the `require` name (`require('state')` → `state.lua`)
-- The addon folder, the entry file, and `addon.name` are all `inctrack` — Ashita requires this match
+- Lua: lowercase, one word, matching the `require` name — `parser.lua`, `state.lua`, `ui.lua`. The shell is named after the addon, which Ashita requires.
+- Python: lowercase with underscore — `run_tests.py`, `stubs.py`
+- Docs: lowercase for `docs/`, UPPERCASE for repo-root conventional files (`README.md`, `CHANGELOG.md`, `LICENSE`)
 
 **Directories:**
-- Lowercase, single word: `inctrack/`, `docs/`, `test/`
+- Lowercase, single word. The addon directory name must match `addon.name`.
 
-**Lua identifiers:**
-- `snake_case` for locals and functions; `SCREAMING_SNAKE` for module constants (`STALE_SECONDS`, `LINGER_SECONDS`, `CONTENT_W`, `BAR_MAIN`, `MUST_SAVE`, `ARG_*`, `COLOR`, `STAT_SHORT`)
-- `State` is the one PascalCase name — it is a metatable-based class with `State.__index = State` and colon methods
-- Event type strings are lowercase snake and paired between parser and state: `begin`, `recover`, `complete`, `phase`, `objective_kills`, `objective_boss`, `objective_text`, `boss_hint`, `bonus_new`, `bonus_progress`, `bonus_done`, `generic_counter`, `generic_done`, `generic_note`, `time`, `points`, `boon`
-
-**Python identifiers:**
-- `snake_case` functions, `SCREAMING_SNAKE` module constants (`HERE`, `ADDON`, `PLAYER`, `TS`, `MUST_PARSE`); suites are `test_*` functions collected manually in `main()`, not by a runner
-
-**File headers:**
-- Every Lua file opens with a `--[[ ... ]]--` block: name, copyright/MIT line, "Written with Claude (Anthropic)", then a prose description of the module's contract
+**Within Lua:**
+- File-scope constants `SCREAMING_SNAKE` (`STALE_SECONDS`, `LINGER_SECONDS`, `NOTE_SECONDS`, `SAVE_RETRY_SECONDS`, `MUST_SAVE`, `SHORT_CACHE_MAX`, `CONTENT_W`, `BAR_MAIN`, `COLOR`, `STAT_SHORT`, `ARG_*`, `FRAME_OPTS`, `LBRACKET`)
+- Local functions and methods `snake_case` (`split_mobs`, `new_run`, `draw_header`, `valid_session`)
+- The state class is `State` (PascalCase, the only one); its module handle in the shell is `State`, instances are `state`
+- Module tables are lowercase and returned at the bottom of the file: `return parser;`, `return ui;`, `return State;`
+- Semicolon statement terminators throughout the Lua, matching Ashita house style
 
 ## Where to Add New Code
 
 **A new server message shape:**
-- Precise handling: add a matcher closure to the `specific` array in `inctrack/parser.lua`, placed so it cannot be shadowed by (or shadow) a neighbour
-- Reduce it: add a `if t == '<type>' then` branch in `State:apply` (`inctrack/state.lua`)
-- Draw it: add or extend a `draw_*` helper in `inctrack/ui.lua` and call it from `ui.render`
-- If the server will not repeat the message, add its type to `MUST_SAVE` in `inctrack/inctrack.lua`
-- If it belongs in the save blob, extend both `State:serialise` and `State:restore`
-- Cover it: add assertions to `test_state_units` or `test_future_content` in `test/run_tests.py`
+- Add a matcher function to the `specific` array in `inctrack/parser.lua`, ordered before any generic form and after any more-precise specific one it could shadow
+- Add a covering literal to `parser.relevant`'s needle list — it must be a literal the new pattern cannot match without, under every alternation and every optional group
+- Handle the new `e.t` in `State:apply` (`inctrack/state.lua`); add it to `MUST_SAVE` in `inctrack/inctrack.lua` if the server never repeats it
+- If it persists, add the field to `serialise()` **and** to `valid_session`/the relevant `valid_*` helper, and read it through `finite()` if it is a number
 
-**A new derived value for the UI:**
-- Add a method on `State` in `inctrack/state.lua`, not a computation in `ui.lua` — this keeps the render path pure and the value testable
+**A new displayed row:**
+- Add a `draw_*` local in `inctrack/ui.lua` and call it from `ui.render` in draw order
+- Update the row inventory in the `ui.lua` header comment — the suite's whole-window snapshot is reviewed against that list before it is pasted in
 
-**A new command or setting:**
-- `default_settings` and the `command` handler in `inctrack/inctrack.lua`; also update the usage block printed by the fallthrough branch, the header comment, and `README.md`
+**A schema change:**
+- Bump `version` in `State:serialise()`, widen the version gate in `State:restore()`, and add a migration arm beside the existing `if data.version == 1` branch
 
-**A new test:**
-- A `test_*(...)` function in `test/run_tests.py` returning a `Suite`, appended in `main()`
+**A new Ashita interaction:**
+- It goes in `inctrack/inctrack.lua` and nowhere else. `parser.lua` and `state.lua` must stay dependency-free; `ui.lua` may require `imgui` only
 
-**Utilities:**
-- No shared helper module exists. Helpers are file-local (`trim`, `split_mobs`, `split_expiry` in `parser.lua`; `clock_str`, `right_text`, `wrapped`, `bar`, `urgency`, `replace_plain`, `shorten` in `ui.lua`). Keep them local rather than introducing a `util.lua`.
+**Tests:**
+- New assertions go in the matching suite function in `test/run_tests.py`; new host surface goes in `test/stubs.py`
 
 ## Special Directories
 
-**`inctrack/` (inner addon folder):**
-- Purpose: the install artifact
-- Generated: No
-- Committed: Yes
+**`test/__pycache__/`:**
+- Purpose: Python bytecode
+- Generated: Yes. Committed: No (`.gitignore`)
 
-**`config/`, `settings/`:**
-- Purpose: Ashita's per-character settings written next to the addon when running from a checkout
-- Generated: Yes
-- Committed: No (`.gitignore`)
+**`.claude/worktrees/`:**
+- Purpose: agent worktree scratch
+- Generated: Yes. Committed: No
 
-**`chatlogs/`, `*.log`:**
-- Purpose: real Ashita chatlogs replayed by the log-backed test suites
-- Generated: Yes (by the game)
-- Committed: No — personal and large; point the harness at them with `INCURSION_CHATLOGS`
+**`chatlogs/`, `config/`, `settings/`:**
+- Purpose: private replay data and Ashita's runtime per-character output
+- Generated: Yes (outside the repo in normal use). Committed: No — excluded explicitly; point the suite at logs with `INCURSION_CHATLOGS`
 
-**`.planning/codebase/`:**
-- Purpose: generated codebase analysis documents
-- Generated: Yes
-- Committed: Per project convention
+**`.planning/`:**
+- Purpose: GSD artifacts
+- Generated: By GSD commands. Committed: Yes
 
 ---
 
-*Structure analysis: 2026-08-28*
+*Structure analysis: 2026-08-29*

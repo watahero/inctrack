@@ -1,454 +1,421 @@
-<!-- refreshed: 2026-08-28 -->
 # Codebase Concerns
 
-**Analysis Date:** 2026-08-28
+**Analysis Date:** 2026-08-29
 
-Scope: `inctrack` v1.1.0 — Ashita v4 addon, 4 Lua files (1,722 lines) plus a
-956-line Python test harness. Findings are ranked by severity within each
-section. Each is marked **[DEFECT]** (a fault visible in the code as written) or
-**[RISK]** (a fragility contingent on server behaviour, Ashita binding details,
-or future change).
+Scope: full repo at v1.2.0 — `inctrack/inctrack.lua` (661), `inctrack/state.lua` (1048),
+`inctrack/ui.lua` (535), `inctrack/parser.lua` (512), `test/run_tests.py` (6255),
+`test/stubs.py` (1504).
 
----
-
-## Known Bugs
-
-**[DEFECT] Every points award counts as a cleared phase:**
-- Symptoms: `Phases cleared` over-reports whenever the server awards incursion
-  points for anything other than a phase boss — a bonus objective payout, a
-  chest, a completion bonus.
-- Files: `inctrack/state.lua:358-365` (`run.phases_cleared = run.phases_cleared + 1`)
-- Trigger: any `<Name> gains N incursion points.` line not caused by a boss kill.
-- Contributing: the `phase` handler at `inctrack/state.lua:198-202` derives the
-  same counter a second, incompatible way (`e.phase - 1`, monotonic max). The two
-  writers agree only under the assumption "one points award == one phase". A
-  points award after the last phase can never be corrected by the `phase` path,
-  because no further `phase` line arrives.
-- Workaround: none in code. Fix approach: make `phase` the sole authority for
-  `phases_cleared` and let `points` only accumulate `run.points` / set
-  `points_partial`; or require an intervening `phase`/`objective_boss` event
-  before an award may increment.
-
-**[DEFECT] Restore does not age the timers by the time the addon was unloaded:**
-- Symptoms: after a reload, crash, or relog, the instance clock (`~mm:ss`), the
-  elapsed counter and the bonus countdown are all optimistic by exactly the
-  downtime — up to `STALE_SECONDS` (3 hours) in the worst accepted case.
-- Files: `inctrack/state.lua:600-634`. `run.started = now - (data.elapsed or 0)`
-  (`:612`), `run.time_sync = now` (`:621`) and
-  `expires_at = now + data.bonus.remaining` (`:632`) all treat the restore
-  instant as if it were the save instant.
-- Trigger: any gap between `serialise()` and `restore()`. `saved_at` (wall clock,
-  written at `state.lua:556`) is already recorded and is used for the staleness
-  check at `state.lua:597`, so the correction term is available and simply not
-  applied.
-- Fix approach: compute `local gap = math.max(0, os.time() - (data.saved_at or os.time()))`
-  and subtract it from `elapsed`'s inverse, from `time_left`, and from
-  `bonus.remaining` — dropping the bonus outright when the adjusted remaining
-  reaches zero.
-
-**[DEFECT] Dead close-button path; the window has no title bar:**
-- Symptoms: the manual-hide branch can never fire, yet both files carry code and
-  comments implying it can.
-- Files: `inctrack/ui.lua:399` adds `ImGuiWindowFlags_NoTitleBar`, so
-  `imgui.Begin(..., ARG_OPEN, ...)` (`ui.lua:407`) never writes
-  `ARG_OPEN[1] = false`; the check at `ui.lua:427-429` is therefore dead, as is
-  the `shown == false` handler at `inctrack/inctrack.lua:219-222` with its
-  comment "Closing via the title bar counts as a manual hide."
-- Trigger: unreachable. Harmless at runtime, but a false affordance that will
-  mislead the next change to visibility handling.
-- Fix approach: delete the `ARG_OPEN` plumbing, or drop `NoTitleBar` if a close
-  button is actually wanted.
-
-**[RISK] `objective_boss` splits on the first " at ":**
-- Symptoms: a mob whose name contains " at " is truncated, and the remainder is
-  folded into the location.
-- Files: `inctrack/parser.lua:135` — `'^New Objective: Defeat (.-) at (.+)!$'`.
-  The name capture is non-greedy, so the *earliest* " at " wins. Same shape at
-  `parser.lua:145` (`boss_hint`) and `parser.lua:176` (`bonus_new` NM form).
-- Trigger: any FFXI NM name containing the substring (the "Goblin at Arms"
-  construction is real in the game's name space).
-- Fix approach: anchor on the location instead — split with
-  `' at (%(.+%))$'` — since the location is reliably parenthesised coordinates.
-
-**[RISK] Mob-list splitting assumes names contain no commas:**
-- Files: `inctrack/parser.lua:34-41` (`split_mobs`, splitting on `[^,]+`).
-- Trigger: a comma-bearing mob name in the `New Objective: Defeat N enemies (...)`
-  list produces phantom entries in `run.objective.mobs`, displayed verbatim at
-  `inctrack/ui.lua:204-206`.
-
----
-
-## Fragile Areas
-
-**[RISK] The whole feature rests on exact server wording — the single largest structural risk:**
-- Files: `inctrack/parser.lua:63-201` (14 specific matchers), all `^`-anchored and
-  literal down to punctuation: `'Begins!'`, `'Complete! (%s) Time: %dm %ds'`,
-  `'Bonus Objective: Find the hidden chest!'`, `'incursion points.'`.
-- Why fragile: CatsEyeXI is a private server that can reword any message in any
-  patch, with no notice and no versioning. A single changed word silently demotes
-  a line from the specific tier to the generic tier (or to nothing), and the addon
-  degrades from progress bars and timers to a line of grey text without ever
-  reporting a problem.
-- Mitigations already present and worth preserving: the generic tier
-  (`parser.lua:206-262`) keeps unknown Incursion-tagged content visible instead of
-  dropping it, and `state.lua` holds no instance, boss, mob or objective names at
-  all — so new server content needs no change in the state machine.
-- Missing mitigation: nothing surfaces "a specific pattern stopped matching." The
-  test suite asserts the generic tier matches nothing in today's logs
-  (`test/run_tests.py`, suite 2), but that runs offline against the author's
-  private logs. In game, a generic-tier hit is indistinguishable from normal
-  operation.
-- Safe modification: never add to `specific` without honouring the ordering
-  contract documented at `parser.lua:54-62`. Three ordering pairs are
-  load-bearing — `bonus_progress` before `phase` (`parser.lua:100` / `:113`),
-  `objective_kills` before `objective_boss` (`:125` / `:135`), and
-  chest → count → named NM (`:150` / `:161` / `:172`). Reorder any of them and a
-  real line is captured by the wrong shape, with no error and no test failure
-  unless the chatlogs happen to contain that case.
-- Test coverage: strong for `parser.lua` and `state.lua` — but only when the
-  private chatlogs are supplied (see *Test Coverage Gaps*).
-
-**[RISK] The boon matcher is the loosest pattern in the file:**
-- Files: `inctrack/parser.lua:194` —
-  `'^(%S+) gains the effect of (.-) %(.-%): (.+)$'`.
-- Why fragile: it distinguishes an Incursion boon from an ordinary buff purely by
-  the presence of a parenthesised glyph followed by `': '`. Any future server or
-  third-party message shaped `<word> gains the effect of X (Y): Z` is absorbed as
-  a boon and rendered in the window. It is also the only matcher reachable via the
-  broadest clause of the fast-path guard, `s:find('): ', 1, true)`
-  (`parser.lua:294`).
-
-**[RISK] Desync inference is heuristic and partly self-cancelling:**
-- Files: `inctrack/state.lua:88-101` (`desync` / `resync`), `:133-150` (`recover`),
-  `:196-231` (`phase`), `:358-380` (`points`), `:600-618` (`restore`).
-- Why fragile: `phase` clears `desynced` at `state.lua:227` on the grounds that a
-  kill count is live information — but that same handler has *already* consumed
-  `run.desynced` two branches earlier (`:208-215`) to decide whether to invalidate
-  the mob list and drop the boss preview. Any future reordering silently disables
-  that invalidation. `phase` also clears the flag directly rather than through
-  `resync()`, deliberately preserving `run.objective.stale`; that asymmetry
-  between the two clearing paths is undocumented at the call site.
-- Second-order: `recover` reuses the existing run when the instance name matches
-  and it is under three hours old (`state.lua:139-142`), then marks it desynced.
-  A player who re-enters the *same* instance as a genuinely new run within that
-  window inherits the previous run's phase, points and boons, because
-  `Recovering session...` carries no phase or objective to contradict them.
-- Safe modification: change `state.lua` only with suites 4-7 of
-  `test/run_tests.py` green; they exist precisely to pin this logic.
-
-**[RISK] `ui.render` runs unprotected inside `d3d_present`:**
-- Files: `inctrack/inctrack.lua:209-223`. Contrast the `text_in` handler
-  (`inctrack.lua:160-204`), which wraps everything in `pcall` for exactly this
-  reason.
-- Why fragile: an error thrown between `imgui.Begin` (`ui.lua:407`) and
-  `imgui.End` (`ui.lua:421`) leaves the ImGui window stack unbalanced *and* skips
-  the matching `imgui.PopStyleVar(1)` (`ui.lua:404` / `:424`). Unbalanced ImGui
-  stacks do not degrade gracefully — they assert or corrupt subsequent frames for
-  every addon in the process — and the fault recurs on every frame thereafter.
-- Reachable error paths in the render tree, all fed by data that came off the wire
-  or out of a JSON blob:
-  - `table.concat(obj.mobs, ', ')` (`ui.lua:202`) errors if `mobs` holds a
-    non-string. `restore` adopts `run.objective = data.objective` wholesale
-    (`state.lua:606`) with no shape validation, so a truncated or hand-edited
-    settings file reaches this line directly.
-  - `imgui.CalcTextSize(text)` is consumed as a single number at `ui.lua:95`. If
-    the binding returns a vector or a second value in a different position, the
-    arithmetic errors — and `right_text` is called from five sites.
-  - `imgui.TextColored(color, text)` is handed server-supplied strings at
-    `ui.lua:137` (instance), `:238`/`:243` (bonus label), `:263` (generic label),
-    `:363` (boon name) and via `wrapped` at `:204`/`:206`/`:374`. If the Ashita
-    binding forwards these as a printf format string, a `%` in server text is a
-    hazard rather than a display glitch.
-- Fix approach: `pcall` the render; on failure, force `imgui.End()` and
-  `PopStyleVar` cleanup, then disable the window with a single chat message rather
-  than repeating the error sixty times a second.
-
-**[RISK] Restored state is trusted structurally:**
-- Files: `inctrack/state.lua:583-654`. `version`, `instance`, `finished` and age
-  are checked (`:584-597`); `objective` (`:606`) and `next_boss` (`:607`) are
-  adopted as-is, and `data.extra` entries (`:646-652`) are copied with only a
-  label fallback. `kills_max`, `objective.count` and `bonus.max` are never
-  type-checked, and a string where a number belongs reaches arithmetic in
-  `ui.lua:196-200`, `:233` and `:266-269`.
-- Current mitigation: `json.decode` is `pcall`-wrapped at `inctrack.lua:135` and
-  `:288`, so malformed *JSON* is safe. Well-formed JSON of the wrong *shape* is
-  not.
-- Recommendation: validate types field-by-field on restore rather than assigning
-  decoded sub-tables by reference.
-
----
-
-## Performance Bottlenecks
-
-**[RISK] Per-chat-line cost is paid before the cheap rejection, not after:**
-- Problem: `text_in` fires for every line in the chat stream — hundreds per second
-  in a full party during combat — and each line allocates several strings before
-  anything decides it is irrelevant.
-- Files, in execution order:
-  1. `inctrack/inctrack.lua:167` — `line:strip_colors()` allocates a new string
-     for *every* line, unconditionally.
-  2. `inctrack/parser.lua:270` — `trim()` (defined `parser.lua:28-30`) runs two
-     chained `gsub`s, each allocating.
-  3. `inctrack/parser.lua:277-283` — the timestamp-stripping `while` loop runs a
-     `gsub` per iteration, plus one more just to discover there is nothing to
-     strip.
-  4. Only then does the prefix guard at `parser.lua:286-294` reject.
-- Cause: the guard is documented as the cheap path ("Chat volume in a party is
-  high and this runs on every line", `parser.lua:286`) but sits behind three
-  allocating steps. Its final clause, `s:find('): ', 1, true)` (`parser.lua:294`),
-  is broad enough that ordinary player chat and many system messages fall through
-  into all 14 specific matchers and then all 5 generic ones.
-- Improvement path: run a cheap `find` on the *raw* line before `strip_colors` and
-  before `trim`; narrow the boon fast-path from `'): '` to
-  `' gains the effect of '`; skip the timestamp loop unless the line starts with
-  `[`.
-
-**[RISK] Synchronous settings writes on the chat thread:**
-- Problem: `persist()` (`inctrack.lua:83-88`) JSON-encodes the run and calls
-  `settings.save()` — a file write — from inside the `text_in` handler.
-- Files: `inctrack/inctrack.lua:190-197`. Eleven event types in `MUST_SAVE`
-  (`inctrack.lua:56-68`) write immediately; everything else still writes every
-  five seconds (`:194`), and `phase` — which arrives on every kill — rides that
-  throttle for the entire run.
-- Cause: durability was chosen over latency deliberately and for a good reason
-  (the server never re-announces objectives), but the cost lands on a hot game
-  thread rather than on a timer.
-- Improvement path: mark dirty and flush from `d3d_present` on an interval;
-  compare the encoded blob against the last one written and skip no-op saves.
-
-**[RISK] Unbounded memo cache:**
-- Files: `inctrack/ui.lua:336` (`short_cache`), keyed by raw server stat strings
-  and read every frame from `shorten` (`ui.lua:338-351`).
-- Impact is small in practice — a run yields a handful of boons — but the key
-  space is server-controlled and the cache is never cleared, not on run reset and
-  not on character switch.
+Each entry is marked **[DEFECT]** — visible in the code as written — or **[RISK]** —
+contingent on input, host or sequence. The known-open items carried forward from the
+v1.2.0 milestone are listed separately at the end and are **not** findings.
 
 ---
 
 ## Tech Debt
 
-**[DEFECT] No CI, no linter, no static analysis:**
-- Issue: `test/run_tests.py` must be run by hand, on Windows, by someone who holds
-  the chatlogs. There is no `.github/` directory in the repository — confirmed
-  absent.
-- Files: repository root; `test/run_tests.py`.
-- Impact: a regression in `parser.lua` or `state.lua` is caught only if the author
-  remembers to run the suite before tagging. Nothing at all catches Lua-level
-  mistakes — accidental globals, typos in rarely-taken branches, unbalanced ImGui
-  push/pop.
-- Fix approach: a GitHub Actions workflow running `luacheck` over `inctrack/` plus
-  the log-independent suites (4-7) of `run_tests.py` on every push. Those suites
-  need only Python and `lupa`, and are already written to skip cleanly without
-  logs.
+### [DEFECT] `State.dirty` is written twenty-one times and read zero times
 
-**[DEFECT] No versioned release artifact:**
-- Issue: `addon.version = '1.1.0'` (`inctrack/inctrack.lua:22`) and `CHANGELOG.md`
-  are the only version markers. Installation is "copy the folder from the default
-  branch", so users cannot pin a version, and a broken commit is live for anyone
-  who re-downloads.
-- Fix approach: tag releases and attach a zip of `inctrack/` to a GitHub release;
-  assert in CI that the tag matches `addon.version`.
+- Files: `inctrack/state.lua:41` (init), `:94`, `:140`, `:161`, `:241`, `:251`, `:263`,
+  `:274`, `:281`, `:295`, `:317`, `:330`, `:341`, `:357`, `:363`, `:370`, `:393`,
+  `:407`, `:412`, `:446` (all writes).
+- Issue: `self.dirty` is set `true` on every state mutation and after `reset()`, and is
+  never read — not by `inctrack.lua`, not by `ui.lua`, not by the suite (`grep dirty`
+  returns writes only). It is also never cleared back to `false` after `State.new`, so
+  even a reader who wired it up would find it permanently latched after the first event.
+- Impact: no runtime effect, but it is actively misleading. The persistence decision is
+  actually made by `MUST_SAVE` plus the five-second throttle in
+  `inctrack/inctrack.lua:106-118` and `:317-321`, and a maintainer reading `state.lua`
+  first will reasonably conclude that `dirty` is the thing that drives the disk write. In
+  a file whose comments are otherwise unusually load-bearing, a vestigial field that
+  contradicts them is a real navigation hazard.
+- Fix approach: delete the field, or clear it in a `State:take_dirty()` and route the
+  frame handler's `save_due` through it. Deleting is the smaller change and matches what
+  the shell actually does.
 
-**[RISK] `os.clock` as the monotonic source:**
-- Issue: acknowledged in the code at `inctrack/inctrack.lua:70-76` — `os.clock` is
-  CPU time by ISO C, and the addon relies on the MSVCRT behaviour of returning
-  wall time since process start.
-- Impact: correct on the target platform today, but every timer in the addon
-  (`state.lua:456-503`, all `clock_str` output in `ui.lua:78-91`) skews silently if
-  that assumption breaks. It is also process-lifetime-relative, which is why
-  `restore` must fall back to `os.time()` (`state.lua:556`, `:597`) — two clocks
-  with different epochs coexist in one file.
-- Fix approach: keep the single `now()` accessor, and mark the mixed-epoch call
-  sites explicitly so the next reader does not compare them.
+### [RISK] Complexity has become its own risk
 
-**[RISK] `pending_time` outlives `reset()`:**
-- Files: `inctrack/state.lua:82-85` — `State:reset` clears `run` and sets `dirty`
-  but leaves `self.pending_time`, which is consumed at `state.lua:125-129`.
-- Impact: a `/incursion reset` within 30 seconds of a
-  `You have N minutes remaining` line seeds the *next* `begin` with the pre-reset
-  timer. A narrow window, bounded only by that 30-second guard.
+- Files: `inctrack/state.lua` (1048 lines, ~60% of it prose), `inctrack/inctrack.lua`
+  (661 lines, ~60% prose), `inctrack/ui.lua` (~44%), `inctrack/parser.lua` (~49%).
+- Issue: the four shipped files total 2,756 lines of which roughly 1,456 are code. The
+  structural validator alone (`state.lua:629-861`) is ~230 lines for ~60 lines of
+  predicate, and the frame handler's deferred-write comment (`inctrack.lua:371-418`) is
+  48 lines in front of 24 lines of code. Individually each block is justified; in
+  aggregate the reader must hold four interacting latches (`render_off`, `render_ok`,
+  `save_told`, `parse_told`), two clocks (`os.clock` monotonic, `os.time` wall), two
+  save gates (`save_due`, `save_retry_at`) and two blob versions in their head at once.
+- Impact: the failure mode is not a bug today; it is that the next change is priced
+  higher than the change deserves, and that reviewers start skimming prose that is
+  carrying real constraints. The three items below (`persist()`'s silent blanking,
+  `reset()`'s ordering, `dirty`) all sit inside heavily-commented regions and were not
+  caught by the prose.
+- Fix approach: consider moving the validator's rationale (`state.lua:629-739`,
+  `:759-786`) into `docs/design.md` and leaving a one-line pointer, and likewise the
+  deferred-write essay. This is a documentation-placement change, not a code change, and
+  it should not be done casually — the comments are the project's memory. Flagged so the
+  cost is priced rather than discovered.
 
-**[RISK] Duplicated wording knowledge in the test harness:**
-- Files: `test/run_tests.py:70-92` — `MUST_PARSE`, `BEGIN`, `COMPLETE`, `POINTS`
-  and `PHASE` re-encode the server's message shapes as Python regexes, in parallel
-  with `inctrack/parser.lua`.
-- Impact: a server wording change requires edits in two files in two languages,
-  and a matching mistake made in both directions yields a green suite over a
-  broken parser.
+### [RISK] Test harness is 2.8× the size of the code it tests
+
+- Files: `test/run_tests.py` (6255), `test/stubs.py` (1504) against 2756 lines of Lua.
+- Issue: 7,759 lines of Python, 11 suites, 13,461 checks. The harness has no tests of its
+  own, and `test/stubs.py` encodes non-trivial host behaviour that is asserted against —
+  the ImGui stack accounting (`stubs.py:620-637`), the `Begin` positional recorder
+  (`:663-681`), the `strip_colors` byte set, the settings-fault injector.
+- Impact: a bug in `stubs.py` reads as a passing suite. The `Begin`-shape and
+  `strip_colors` cases in particular are places where the stub *is* the specification, so
+  a stub that drifts from Ashita makes the suite confidently wrong rather than red.
+- Fix approach: no action proposed; recorded so it is a known property rather than a
+  surprise. The mitigation already in place — stub comments citing Ashita source paths
+  and line numbers — is the right one.
 
 ---
 
-## Test Coverage Gaps
+## Known Bugs
 
-**[DEFECT] `ui.lua` (433 lines) has zero automated coverage:**
-- What's not tested: every function in the render tree — `clock_str`
-  (`ui.lua:78-91`), `right_text` (`:94-102`), `wrapped` (`:104-110`), `bar`
-  (`:112-120`), `urgency` (`:122-135`), `replace_plain` (`:320-333`), `shorten`
-  (`:338-351`), the `STAT_SHORT` table (`:294-316`), and `ui.render`'s ImGui stack
-  balance (`:387-431`).
-- Files: `inctrack/ui.lua` (entire file).
-- Risk: this is the only file that can crash the game (see *`ui.render` runs
-  unprotected inside `d3d_present`*), and it is the least verified.
-- Priority: **High**. The pure helpers — `clock_str`, `replace_plain`, `shorten`,
-  `urgency` — have no ImGui dependency and are testable in the existing `lupa`
-  harness today with no new infrastructure. The longest-phrase-first ordering
-  contract of `STAT_SHORT` (documented at `ui.lua:286-292`) is entirely unasserted,
-  and it is exactly the kind of table a future edit re-sorts alphabetically.
+### [DEFECT] A failed `json.encode` silently destroys the last good saved run
 
-**[DEFECT] `inctrack.lua` (301 lines) has zero automated coverage:**
-- What's not tested: the `MUST_SAVE` throttle policy (`inctrack.lua:56-68`,
-  `:190-197`), `visible()`'s override/auto interaction (`:97-106`), the command
-  surface (`:228-273`), the load-time resume path (`:113-146`), and the
-  character-switch handler (`:275-301`).
-- Files: `inctrack/inctrack.lua`.
-- Risk: the profile-switch handler is the piece most likely to leak one
-  character's run — or one character's name filter — into another's window, and
-  bugs here are user-visible on every login.
-- Priority: **High** for `visible()` and the settings-profile handler, which are
-  pure enough to exercise against an Ashita stub; **Medium** for the rest.
+- Files: `inctrack/inctrack.lua:139-144`.
+- Symptoms: `persist()` reads
 
-**[DEFECT] The deepest suites depend on the author's private chatlogs:**
-- What's not tested without them: suites 1-3 — parser coverage, the generic-tier
-  assertion, and full run reconstruction — that is, the entire real-data
-  validation of the parser.
-- Files: `test/run_tests.py:44-66` (`find_logs`, `find_ashita_libs`); the logs are
-  excluded by `.gitignore` as personal data.
-- Risk: a contributor or a CI job runs the suite, sees green, and has actually
-  verified only the synthetic unit tests. The silent skip is the right default for
-  a contributor and the wrong one for a release gate.
-- Priority: **High**. Fix approach: commit a small anonymised fixture log — one
-  run per instance type, character name scrubbed — so suites 1-3 have a public
-  floor; keep the private-log path as the extended run; and add a `--strict` mode
-  that exits non-zero when any suite skips.
+  ```lua
+  local ok, encoded = pcall(json.encode, blob);
+  incursion.settings.session = (ok and blob ~= nil) and encoded or '';
+  settings.save();
+  ```
 
-**[RISK] Suite 8 (persistence round-trip) needs Ashita's `json.lua`:**
-- Files: `test/run_tests.py:20-23`, resolved via `INCURSION_ASHITA_LIBS`.
-- Risk: the serialise/restore contract — including both `state.lua` restore
-  defects above — is verified only on a machine with Ashita installed.
-- Priority: **Medium**. Vendor a copy of `json.lua` under `test/`, or fetch it as a
-  pinned dependency in CI.
+  When the encode raises, `ok` is false and the expression falls to `''`. The addon then
+  writes that empty string to disk over a perfectly good previously-saved run, and says
+  nothing.
+- Trigger: any raise out of the host's `json.encode` on a serialised run — the test
+  harness's own encoder raises on non-finite numbers (`test/stubs.py`, `numstr`), and
+  Ashita's real encoder is a dependency whose failure modes are not enumerated here. The
+  blob's strings are server-authored text that has been through `strip_colors` and the
+  parser but is otherwise unconstrained.
+- Impact: this is the one failure path in the file that is both **silent** and
+  **destructive**, and it is the odd one out by design intent. The neighbouring write
+  failure is caught, retried on a five-second window, and reported once via `save_told`
+  (`:419-442`); the render failure latches and reports; the parse failure reports. An
+  encode failure does none of that and additionally overwrites the run it failed to
+  encode. A mid-run reload afterwards comes back blank — exactly the outcome the
+  persistence layer exists to prevent.
+- Workaround: none available to the player; `/incursion reset` is what they would reach
+  for and it makes no difference.
+- Fix approach: on `not ok`, leave `incursion.settings.session` untouched, skip the
+  `settings.save()`, and route the report through the existing `save_told` latch. Blank
+  the session only in the one case that means it — `blob == nil`, i.e. there is no run.
+  Two branches instead of one ternary.
+
+### [DEFECT] `reset()` can resurrect the run it cleared, if the disk write fails
+
+- Files: `inctrack/inctrack.lua:146-173`, specifically `:159` (`save_due = false`) and
+  `:168-169` (`session = ''; settings.save()`).
+- Symptoms: `reset()` clears `save_due` first — correctly, so a stale owed write cannot
+  put the run back — and then performs its own unprotected `settings.save()`. If that
+  save raises, the exception leaves the command handler, **and** the in-memory
+  `session = ''` is now owed to a disk write that no later frame will ever make, because
+  `save_due` was just cleared and nothing re-arms it. The old run stays on disk.
+- Trigger: a read-only settings file, a full disk, or the file held open by another
+  process — the same fault class the frame handler was hardened against this milestone.
+- Impact: the player types `/incursion reset`, sees a raise instead of `Run cleared.`,
+  and on the next addon load the run they threw away is resumed. This is a consequence of
+  the *ordering*, not just of the unprotected save, so it is not fully covered by the
+  known-open note that `reset()`'s save is unprotected: fixing only the protection
+  (wrapping the call in `pcall`) leaves the resurrection intact.
+- Fix approach: on a failed save inside `reset()`, re-arm `save_due = true` so the frame
+  handler retries the clear, and report through `save_told`. Same shape as the frame
+  handler already uses.
+
+### [RISK] The unload and load handlers still write to disk unprotected
+
+- Files: `inctrack/inctrack.lua:259` (`persist()` in the unload handler),
+  `inctrack/inctrack.lua:245` (`settings.save()` in the load handler).
+- Symptoms: a raise out of `settings.save()` on either path escapes into Ashita's event
+  dispatch. The unload case is the more consequential: it fires during addon unload or
+  client shutdown, it is documented at `:254-257` as "the one path that cannot wait for a
+  frame", and its unconditional write is explicitly what makes deferring every other
+  write safe. A raise there means the last write of the session did not happen, on the
+  one path with no retry behind it.
+- Trigger: same disk fault class as above.
+- Impact: silent loss of everything since the last successful frame write, on exactly the
+  path that exists to prevent that. Note these two are **not** on the known-open list —
+  that list names `reset()`, the command handler and the profile-switch callback, all on
+  the command path. The unload path is a different one and is unmentioned.
+- Fix approach: `pcall(persist)` in the unload handler. There is nothing useful to do
+  with the failure at unload time beyond reporting it, but the raise itself should not
+  escape.
 
 ---
 
 ## Security Considerations
 
-**Server-controlled strings reach a printf-style UI layer:**
-- Risk: instance names, boon names, mob lists and unrecognised notes travel
-  untouched from the chat stream into `imgui.TextColored` — `ui.lua:137`, `:238`,
-  `:243`, `:263`, `:363`, and via `wrapped` at `:204`, `:206`, `:374`. If the
-  Ashita ImGui binding treats the string as a format string, a `%` sequence in
-  server text is a crash or memory-read hazard; if it does not, it is a display
-  artefact. The binding's behaviour is assumed, not asserted anywhere.
-- Current mitigation: none — no escaping and no length cap. Unbounded strings also
-  defeat the fixed-width wrapping contract at `ui.lua:104-110`.
-- Recommendations: route server text through an explicit `'%s'` format, or escape
-  `%`; truncate to a sane maximum before display.
+### [RISK] The settings file is a player-editable, un-integrality-checked input to arithmetic and `%d`
 
-**Server-controlled strings are persisted to disk:**
-- Risk: `serialise()` writes labels, mob names and boon text into the settings JSON
-  (`state.lua:527-580`), and `run.extra` uses server text as *table keys*
-  (`state.lua:576`). That blob is read back and re-adopted at `state.lua:646-652`
-  with only a label fallback.
-- Current mitigation: `pcall`-wrapped encode (`inctrack.lua:85`) and decode
-  (`inctrack.lua:135`, `:288`); no shape validation after decode.
-- Recommendations: validate types on restore (see *Restored state is trusted
-  structurally*); cap key and value lengths before persisting.
+- Files: `inctrack/state.lua:699-704` (`finite`), `:844-861` (`valid_session`), `:937-938`
+  and `:968` and `:985-988` (the reads); consumed at `inctrack/ui.lua:232`, `:277`,
+  `:310`, `:312`.
+- Risk: `valid_session` checks *shape* and `finite()` removes NaN and ±infinity, and both
+  choices are deliberate and well-argued. Neither checks **sign** or **integrality**, and
+  neither bounds magnitude. A hand-edited or corrupted `session` blob carrying
+  `"phase": -5`, `"phase": 2.5`, `"kills_max": 1e300` or `"phases_cleared": -40` passes
+  every gate and reaches the run record intact.
+- Current mitigation: `finite()` for the non-finite cases; `bar()` clamps its fraction to
+  `[0,1]` (`ui.lua:158-159`) so the drawn bar cannot overflow.
+- What it costs: the *labels* are not clamped. `ui.lua:232` formats `'%s  %d/%d'` with
+  `run.kills_cur` and `run.kills_max` straight from the blob, and `ui.lua:233` concatenates
+  `'Phase #' .. run.phase`. Under LuaJIT — the dialect Ashita embeds — a fractional or
+  huge value there prints a truncated or garbage integer; under Lua 5.5 `%d` on a
+  non-integral float raises, which reaches `ui.render`, trips `render_off`, and takes the
+  window off screen for the session. Either way the outcome is the one the project names
+  as its worst: a number on screen the server never sent, drawn with the same confidence
+  as one it did. `ui.lua:325` (`tostring(run.phases_cleared)`) will happily print `-40`.
+- Recommendations: add a small `count(v)` beside `finite(v)` in `state.lua` that answers
+  nil for anything non-integral or negative, and read `phase`, `kills_cur`, `kills_max`,
+  `phases_cleared`, `awards_seen`, `points`, and `bonus.cur`/`bonus.max` through it. This
+  is the same "reject, never coerce" rule already stated at `state.lua:640-647` — it just
+  is not currently applied to the numeric domain, only to the numeric *type*. The two
+  reads that are genuinely continuous (`elapsed`, `time_left`, `saved_at`,
+  `bonus.remaining`) should keep `finite()` and only gain a sign check where a negative
+  is meaningless.
 
-**Points attribution accepts anyone when the player name is unknown:**
-- Risk: `state.lua:360-363` filters points to `self.player`, but only when a name
-  is set. Before the name resolves (`inctrack.lua:170-179` fills it lazily on the
-  first parsed event), any `<Name> gains N incursion points.` is accepted — and
-  because of the phase-counting defect above, it also increments
-  `phases_cleared`. The same fallback applies to boons (`state.lua:382-384`).
-- Current mitigation: the code comment argues the server only addresses these
-  messages to us; that is an assumption about a private server, not an enforced
-  invariant.
-- Recommendation: buffer or drop attribution-sensitive events until a player name
-  is known, rather than accepting them.
+### [RISK] `json.decode` is a trust boundary this repo cannot inspect
 
-**Chat error spam has no rate limit:**
-- Risk: `printf('parse error: %s', ...)` (`inctrack.lua:202`) fires once per
-  offending chat line. A systematic parse failure floods the player's chat at
-  chat-stream rate and drowns the game's own messages.
-- Recommendation: report the first failure, then suppress until the message text
-  changes or N seconds elapse.
+- Files: `inctrack/inctrack.lua:30` (`require('json')`), `:198` (`pcall(json.decode, saved)`).
+- Risk: the decoded value is a player-editable file's contents. The addon does the right
+  things around it — the call is protected, the result is type-checked, the shape is
+  validated, and every field is copied rather than adopted (`state.lua:940-944`). What it
+  cannot do is verify that Ashita's `json.decode` is a scanner rather than a `load()`-based
+  evaluator; no vendored copy ships in this repo. `test/stubs.py`'s replacement encoder is
+  explicitly a character-by-character scanner and says why, which pins the harness but not
+  the host.
+- Current mitigation: `pcall` around the decode, plus the structural validator behind it.
+- Recommendations: none actionable in this repo. Recorded in the same spirit as the
+  known-open ImGui-binding item: an assumption resting on a dependency whose source is not
+  available here. If a vendored `json.lua` ever lands in the tree, this becomes checkable.
 
-**Not a concern, and worth stating explicitly:** the addon is read-only with
-respect to the game. No packet injection, no memory writes; `text_in` never sets
-`e.blocked` and never modifies `e.message` (`inctrack.lua:160-204`). The only
-`e.blocked` is on the addon's own `/incursion` command (`inctrack.lua:236`).
-`AshitaCore` reads are limited to `GetParty():GetMemberName(0)`
-(`inctrack.lua:122`, `:174`).
+---
+
+## Performance Bottlenecks
+
+### [RISK] `run.extra` is unbounded and re-sorted with fresh allocations on every frame
+
+- Files: `inctrack/state.lua:336-343` (`generic_counter` writes), `:528-545`
+  (`extra_sorted`), `:1035-1042` (restore copies without limit), `:788-801` (`map_of`,
+  unbounded); consumed at `inctrack/ui.lua:297-318`.
+- Problem: `run.extra` is keyed by `e.label`, which is trimmed text the *generic* matcher
+  pulled out of a server line (`parser.lua:296-305`). Every distinct label the server ever
+  sends during a run adds a permanent entry; the table is cleared only on `complete`
+  (`state.lua:444`) or `reset()`. `extra_sorted()` then, on every frame in which the table
+  is non-empty, allocates a fresh list, allocates a fresh comparator closure, and runs
+  `table.sort` over the whole thing.
+- Cause: no cap and no eviction, in a file that is otherwise scrupulous about exactly this
+  — `NO_EXTRAS` at `state.lua:525` exists to avoid one table allocation per frame, and
+  `ui.lua` hoists `ARG_SPACER`, `ARG_BAR_MAIN`, `ARG_BAR_THIN`, `ARG_PAD_TIGHT` and
+  `inctrack.lua` hoists `FRAME_OPTS` for the same reason.
+- Notable asymmetry: the boon shorthand memo cache **was** given a hard bound this
+  milestone (`ui.lua:404`, `SHORT_CACHE_MAX = 64`) with three paragraphs explaining why an
+  unbounded server-authored key set is unacceptable. `run.extra` has a server-authored key
+  set, no bound, a per-frame sort, and a round trip through the disk blob — and got none of
+  that treatment. The argument at `ui.lua:382-403` applies to it verbatim and more forcibly.
+- Improvement path: cap `run.extra` the same way (a count, and drop-the-lot or
+  drop-oldest-by-`at` at the cap), and either cache the sorted list against a generation
+  counter or sort only when `extra` actually changed. The corpus cannot exercise this —
+  the suite asserts the generic tier matches nothing in the 127 logs (`parser.lua:36-38`),
+  which is precisely why nothing has ever put more than a handful of entries in this table.
+
+### [RISK] The memo cache bounds entry *count*, not key *size*
+
+- Files: `inctrack/ui.lua:404-449` (`SHORT_CACHE_MAX`, `short_cache`, `shorten`),
+  `:364-377` (`replace_plain`).
+- Problem: the bound is 64 entries; nothing bounds how long a single `stats` string is. On
+  a cache miss, `shorten()` runs 21 sequential `replace_plain` passes
+  (`ui.lua:435-437`), each of which builds a complete new copy of the string via
+  `table.concat`, and then two `gsub`s. That is ~23 full copies of the key on the game
+  thread in one frame.
+- Reachability: from chat the key is bounded by the client's line length, which makes this
+  a non-issue. From a **restored blob** it is not: `valid_boon` (`state.lua:835-837`)
+  accepts any string of any length, `restore()` copies it verbatim (`:1031`), and JSON
+  string length is unbounded in a file the player can hand-edit. `right_text` then hands
+  the result to `imgui.CalcTextSize` (`ui.lua:139`).
+- Improvement path: reject or truncate a `stats` (and `name`, and `objective.text`) longer
+  than some sane display bound in the validator, or refuse to memoise a key past a length
+  and short-circuit `shorten` for it. The cheaper half — refusing to cache an oversized key
+  — does not fix the per-frame re-shorten, so the validator side is the one that matters.
+
+### [RISK] `save_at` and `save_retry_at` measure different things and are not reconciled
+
+- Files: `inctrack/inctrack.lua:317-321` (throttle decision), `:419-425` (retry window),
+  `:102` (`SAVE_RETRY_SECONDS = 5.0`).
+- Problem: `save_at` is stamped when the chat thread *decides* a write is owed, not when
+  one lands. After a failed write the retry is deferred by five seconds, during which
+  further non-`MUST_SAVE` events see `t - save_at > 5.0` and re-arm `save_due` that is
+  already armed — harmless — but the throttle's own window has meanwhile drifted off the
+  actual write cadence.
+- Impact: cosmetic under any fault-free run; under a persistent disk fault the two
+  five-second numbers interleave in a way nothing pins. The code comment at `:98-101`
+  reasons about the retry bound being "one fewer number to reason about" by reusing five
+  seconds, which is true of the constant and not of the two clocks it now governs.
+- Improvement path: stamp `save_at` in the frame handler when a write actually succeeds,
+  rather than in `text_in` when one is decided. Small, and it makes the throttle mean what
+  its comment says.
+
+---
+
+## Fragile Areas
+
+### [RISK] The profile-switch callback's `s == nil` path saves anyway, and no test can reach it
+
+- Files: `inctrack/inctrack.lua:624-661`; harness at `test/stubs.py`, `__host_switch`.
+- Why fragile: the callback body is `if s ~= nil then ... end` followed by an
+  **unconditional** `settings.save()` at `:660`. On a `nil` callback argument the addon
+  clears nothing, adopts nothing, resumes nothing — and then writes. What it writes is
+  whatever `incursion.settings` currently holds, which is the *previous* character's table
+  including that character's `session` string. Whether Ashita ever invokes the callback
+  with nil is not determinable from this repo; the guard at `:625` exists, so at some point
+  someone believed it could.
+- Safe modification: move the `settings.save()` inside the `if`, or state explicitly why a
+  nil update is owed a write. Either is a one-line change; the current shape is the one
+  that cannot be read as intentional.
+- Test coverage: none, and none reachable. `__host_switch(over)` in `test/stubs.py` always
+  merges defaults with the override and always passes a table, so the `nil` arm of `:625`
+  and the save-on-nil at `:660` are both dead to the suite. Extending the stub with an
+  explicit nil-fire is cheap and would settle it.
+
+### [RISK] Four latches, three clearing sites, no single owner
+
+- Files: `inctrack/inctrack.lua:78` (`save_told`), `:82` (`render_off`), `:87`
+  (`render_ok`), `:95` (`parse_told`); cleared at `:153-163` (`reset`), `:559`
+  (`/incursion` bare, `render_off` only), `:635-643` (profile switch).
+- Why fragile: three of the four are cleared in two places with the clearing duplicated
+  rather than shared — the profile-switch callback's own comment at `:630-634` says so
+  outright ("This callback does its own clearing rather than calling `reset()`, so all
+  three fields have to be cleared here too"). `render_ok` is deliberately cleared by
+  neither. `/incursion` bare clears `render_off` alone. The next latch added has four
+  sites to get right and one of them is a comment asking to be remembered.
+- One interaction worth naming: `reset()` clears `save_told` — "so the player hears about
+  disk faults again" — and then immediately performs the unprotected `settings.save()` at
+  `:169` that, on a persistent fault, is the very call most likely to raise. The clearing
+  and the raise are two lines apart, and the raise escapes before anything can report it.
+- Safe modification: factor the clearing into one `clear_session_latches()` called from
+  both `reset()` and the profile-switch callback, leaving `render_ok` explicitly outside
+  it with the existing comment. Do not fold `/incursion` bare into it — that path
+  deliberately preserves `override`, per `:560-568`.
+
+### [RISK] The deferred write's bound is "the next `d3d_present`", not a duration
+
+- Files: `inctrack/inctrack.lua:406-417` (states the residual), `:419-442`.
+- Why fragile: fully documented and correctly reasoned — recorded here only because it is
+  the one accepted data-loss window in the design and it is invisible in the code itself.
+  A minimised, alt-tabbed or background-throttled client stretches the unwritten interval
+  arbitrarily; a client killed in that interval loses everything since the last frame that
+  ran, not one event. Orderly exits are covered by the unload handler — which is itself
+  unprotected, see above, so the two concerns compound: the mitigation for the deferral is
+  the one write with no retry and no protection behind it.
+- Test coverage: the deferral and the retry are covered; the compound case (a client that
+  stops presenting *and then* fails its unload write) is not, and probably cannot be.
 
 ---
 
 ## Scaling Limits
 
-**Chat throughput:**
-- Current capacity: untested and unmeasured. Cost scales linearly with party chat
-  volume; see *Per-chat-line cost is paid before the cheap rejection*.
-- Limit: unknown — there is no profiling hook and no frame-budget assertion.
-- Scaling path: move the rejection ahead of the allocations (`inctrack.lua:167`,
-  `parser.lua:270-294`).
+**`run.extra` entries:** no cap. Growth is driven by distinct server-authored labels
+reaching the generic counter matcher; the practical current capacity is "however many the
+server sends", which is zero across the whole 127-log corpus. See the performance entry
+above.
 
-**Generic counters per run:**
-- Current capacity: `run.extra` (`state.lua:64`) grows one entry per distinct
-  unrecognised counter label, cleared only on `complete` (`state.lua:414`) or
-  `reset`.
-- Limit: every entry is rendered each frame through `extra_sorted()`
-  (`state.lua:491-511`), which allocates a list and sorts it *per frame* whenever
-  any extras exist. The `NO_EXTRAS` fast path (`state.lua:487`) only covers the
-  empty case.
-- Scaling path: cache the sorted list and invalidate on write, rather than
-  rebuilding it at 60fps.
+**`short_cache` entries:** 64, enforced at `inctrack/ui.lua:443-445` by dropping the
+whole table. Key length is unbounded; see above.
 
-**Restore window:**
-- `STALE_SECONDS = 3 * 60 * 60` (`state.lua:27`) is one constant governing three
-  distinct decisions: restore acceptance (`state.lua:597`), `recover` run reuse
-  (`state.lua:142`), and — implicitly — how far wrong the un-aged timers can be
-  (see the restore defect). Three hours is generous for all three, and they
-  probably want different values.
+**Boons per run:** unbounded, drawn one row per boon (`ui.lua:452-464`) inside an
+auto-resizing window with no scrollbar (`ui.lua:496`). A run with many boons grows the
+window until it exceeds the screen, with nothing to scroll. Not reachable from real
+content; reachable from a hand-edited blob, since `array_of(data.boons, valid_boon)`
+(`state.lua:859`) has no length limit.
 
 ---
 
 ## Dependencies at Risk
 
-**Ashita v4 addon API** (`common`, `chat`, `settings`, `json`, `imgui`):
-- Risk: an unversioned, private-target platform. `settings.register`
-  (`inctrack.lua:275`), `string:strip_colors` (`inctrack.lua:167`) and the exact
-  ImGui binding signatures are all assumed and none are probed.
-- Impact: an Ashita update changing any of them breaks the addon at load or — in
-  the ImGui case — at render time, inside an unprotected per-frame callback.
-- Migration plan: none exists; there is no alternative host. Mitigate by probing
-  for the required functions at load and refusing to register handlers with a
-  clear chat message, rather than erroring on every frame.
+**Ashita `imgui` binding** — known-open, see below.
 
-**`lupa` (test-only):**
-- Risk: the suite embeds a Lua runtime via `test/run_tests.py:35`. Unpinned, with
-  no `requirements.txt` in the repository.
-- Impact: a `lupa` release that changes table-conversion semantics breaks
-  `new_state`/`lua.table_from` (`test/run_tests.py:99-102`) and the suite fails for
-  reasons unrelated to the addon.
+**Ashita `json`** — see the security entry. No vendored copy, no enumerable failure modes,
+and the one code path that reacts to its failure reacts destructively (`inctrack.lua:142`).
+
+**`lupa` / Lua backends in the harness** — `test/stubs.py:29-45` already documents that the
+module-level `lupa.lua_type` answers `None` for LuaJIT-built proxies and dispatches around
+it. This is a live compatibility seam between the harness and whichever `lupa` a
+contributor has installed, and it is asserted on rather than merely used.
 
 ---
 
-## Missing Critical Features
+## Test Coverage Gaps
 
-**No self-diagnostic for pattern drift:**
-- Problem: nothing tells the player, or the author, that a specific pattern has
-  stopped matching and the generic tier is now carrying the run.
-- Blocks: the earliest possible detection of this project's largest risk. A
-  `/incursion debug` reporting generic-tier hit counts for the current run would
-  turn a silent degradation into a bug report.
+**Numeric domain of the restore validator** — `state.lua:699-704`, `:844-861`.
+Not tested: negative, fractional, or astronomically large values for `phase`,
+`kills_cur`, `kills_max`, `phases_cleared`, `awards_seen`. `grep` for fractional or
+negative fixtures in `test/run_tests.py` returns nothing relevant. Risk: the `%d`
+formats in `ui.lua` consume all of these. **Priority: high** — this is the cheapest
+of the gaps to close and the one attached to a live finding.
 
-**No window configuration:**
-- Problem: position, scale, opacity and section visibility are compile-time
-  constants — `CONTENT_W` (`ui.lua:63`), the bar heights (`ui.lua:56-57`), the
-  `COLOR` table (`ui.lua:32-49`). Only `auto` and `locked` are persisted
-  (`inctrack.lua:36-45`).
-- Blocks: any user running a non-default UI scale or resolution, who cannot make
-  the window fit without editing source.
+**`persist()`'s encode-failure branch** — `inctrack.lua:141-142`.
+The harness can inject a *save* fault (`test/stubs.py`, `__host_save_fault`) but there
+is no corresponding encode fault, so the branch that blanks the session has never been
+executed. Risk: the destructive path is unexercised. **Priority: high.**
+
+**`reset()` with a failing save** — `inctrack.lua:168-169`.
+The save-fault injector exists; it has not been pointed at the reset path. Would catch
+both the escaping raise and the resurrection ordering. **Priority: high.**
+
+**Unload handler with a failing save** — `inctrack.lua:259`. Same injector, same
+omission. **Priority: medium.**
+
+**Profile-switch callback invoked with nil** — `inctrack.lua:625`, `:660`. Requires a
+small extension to `__host_switch` in `test/stubs.py`. **Priority: medium.**
+
+**`run.extra` under many distinct labels** — `state.lua:336-343`, `:528-545`.
+Nothing drives more than a handful of generic counters, by construction: the suite
+asserts the generic tier matches nothing in the corpus. A synthetic feed of N distinct
+labels would pin both the growth and the per-frame sort cost. **Priority: medium.**
+
+**Oversized strings through restore** — `state.lua:835-837`, `ui.lua:428-449`.
+No fixture carries a `stats`, `name` or `objective.text` longer than a chat line.
+**Priority: low.**
 
 ---
 
-*Concerns audit: 2026-08-28*
+## Known-Open Items (carried forward, not findings)
+
+Recorded here so this document is complete. These were established at v1.2.0 and are
+not new discoveries.
+
+**Four in-game checks that no test can close.** Nothing in the suite can reach them, and
+the reason is structural in each case, not an omission:
+
+- The colour fall-through in `parser.relevant` (`inctrack/parser.lua:427-430`) has zero
+  corpus backing by construction — Ashita strips colour markers when writing logs, so no
+  real log can carry one.
+- The reload clock.
+- The window frame following the `Begin` call-shape change (`inctrack/ui.lua:513`).
+- The `imgui.End` lookup through Ashita's metatable (`inctrack/inctrack.lua:513-523`).
+
+These are the honest limit of what has been proven.
+
+**`settings.save()` is unprotected on the command path** — in `reset()`
+(`inctrack.lua:169`), the command handler (`:598`, `:606`) and the profile-switch callback
+(`:660`). Same fault class as the frame-handler fix. *(The ordering consequence inside
+`reset()`, and the separate unload/load-path exposure, are recorded as findings above;
+the bare lack of protection on these three is the known-open item.)*
+
+**`Phase  13/0`** — with `kills_max` and `objective.count` both absent, the phase bar's
+label at `inctrack/ui.lua:231-233` prints a denominator the server never sent.
+
+**The compiled ImGui binding cannot be inspected** — no binding source ships, so the
+`Begin(name, nil, flags)` call shape at `inctrack/ui.lua:513` rests on the SDK header
+(`plugins/sdk/imgui.h:305`) plus a survey of 220 call sites.
+
+**PROC-01…04** — CI, luacheck, a versioned release artifact, and a public chatlog fixture
+are deliberately deferred, not debt discovered.
+
+---
+
+*Concerns audit: 2026-08-29*

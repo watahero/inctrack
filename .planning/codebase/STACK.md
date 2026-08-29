@@ -1,87 +1,134 @@
 # Technology Stack
 
-**Analysis Date:** 2026-08-28
+**Analysis Date:** 2026-08-29
 
 ## Languages
 
 **Primary:**
-- Lua 5.1 (Ashita v4's embedded LuaJIT dialect) — the entire shipped addon: `inctrack/inctrack.lua`, `inctrack/parser.lua`, `inctrack/state.lua`, `inctrack/ui.lua` (1,722 lines total)
+- Lua (Lua 5.1 semantics, as embedded by Ashita v4) — the entire shipped addon:
+  `inctrack/inctrack.lua` (661 lines), `inctrack/parser.lua` (512),
+  `inctrack/state.lua` (1048), `inctrack/ui.lua` (535).
 
 **Secondary:**
-- Python 3 — test harness only, never shipped: `test/run_tests.py` (956 lines)
-- Markdown — `README.md`, `CHANGELOG.md`, `docs/design.md`
+- Python 3.14.5 — test harness only, never shipped: `test/run_tests.py` (6255 lines),
+  `test/stubs.py` (1504 lines).
+- Markdown — `README.md`, `CHANGELOG.md`, `docs/design.md`, `.planning/`.
 
 ## Runtime
 
 **Environment:**
-- Ashita v4 addon host (LuaJIT / Lua 5.1) running in-process with the FFXI client, against the **CatsEyeXI** private server
-- Installed by copying the `inctrack/` folder to `<CatsEyeXI install>\catseyexi-client\Ashita\addons\inctrack\`; loaded with `/addon load inctrack`
-- Windows only (Ashita is a Windows d3d8 hook). `inctrack/inctrack.lua:70` explicitly relies on `os.clock()` being wall-clock-since-process-start, which is the Windows CRT behaviour
-- Python 3 + `lupa` (embedded Lua) for the out-of-game test runner
+- **Ship target:** Ashita v4 on Windows, against the CatsEyeXI FFXI client
+  (`<CatsEyeXI install>\catseyexi-client\Ashita\addons\inctrack\`). Ashita
+  embeds **LuaJIT 2.1**, so the shipped code must hold to **Lua 5.1 semantics** —
+  no integer division, no `goto`-era 5.4 idioms, no 5.4 `require` second return.
+- **Test host:** CPython 3.14.5 driving an embedded Lua through `lupa` 2.8.
+  `lupa` 2.8 ships seven backends — `lua51`, `lua52`, `lua53`, `lua54`, `lua55`,
+  `luajit20`, `luajit21` — and a plain `lupa.LuaRuntime()` resolves to whichever
+  was built in. `lua_runtime()` in `test/run_tests.py` (~line 393) selects one by
+  name from the `INCTRACK_LUA` environment variable:
+
+  ```
+  INCTRACK_LUA=luajit21 python test/run_tests.py
+  ```
+
+  An unknown name raises with the list of shipped backends. The suite is verified
+  green on **Lua 5.5** (lupa's default build on the contributor machine) and on
+  **LuaJIT 2.1** (the dialect Ashita actually embeds). `test/stubs.py` carries its
+  own `lua_type` shim (~line 30) because module-level `lupa.lua_type` only
+  recognises proxies from the one backend a plain `LuaRuntime()` resolved to.
 
 **Package Manager:**
-- None for the addon. There is no manifest, no lockfile, no vendored dependency directory
-- `pip` is used only to install the single test dependency: `pip install lupa`
+- None for the addon. No `package.json`, `requirements.txt`, `pyproject.toml`,
+  `Cargo.toml` or `go.mod` exists anywhere in the repository.
+- Lockfile: none, and none wanted — the addon is copied into an Ashita addons
+  directory by hand or by `git clone`.
+- The single Python dependency is installed ad hoc: `pip install lupa`.
 
 ## Frameworks
 
 **Core:**
-- **Ashita v4 addon API** — event registration, settings persistence, chat output, memory manager. Entry point `inctrack/inctrack.lua`
-- **Dear ImGui** via Ashita's `imgui` Lua binding — the entire HUD. `inctrack/ui.lua:28`
+- Ashita v4 addon framework — `ashita.events.register`, `AshitaCore`, and the
+  stock libraries `common`, `chat`, `settings`, `json`, `imgui`. See
+  `.planning/codebase/INTEGRATIONS.md`.
+- Dear ImGui, reached through Ashita's `addons/libs/imgui.lua`, for the whole HUD
+  (`inctrack/ui.lua`).
 
 **Testing:**
-- **Python `unittest`-free custom harness** — hand-rolled `Result` suite class in `test/run_tests.py:149`, no pytest
-- **`lupa`** — embeds a Lua runtime in Python so `parser.lua` and `state.lua` (which have zero Ashita dependency) run outside the game. Bootstrap at `test/run_tests.py:95` (`make_lua()`), which prepends the `inctrack/` folder onto `package.path` and `require`s the two modules
+- No third-party test framework. `test/run_tests.py` is a hand-rolled harness:
+  eleven suite functions printing thirteen result lines, a `Result` type with
+  `xfail` support, and `main()` guarding totals against `EXPECTED_XFAILS` /
+  `EXPECTED_DEFECTS` (both now empty).
+- `lupa` 2.8 is the only import that is not stdlib (`os`, `re`, `sys`, `glob`,
+  `time`, `importlib`, `traceback`).
+- `test/stubs.py` supplies a recording ImGui stub and in-memory Ashita host fakes
+  so `ui.lua` and `inctrack.lua` can run outside the game.
 
 **Build/Dev:**
-- None. There is no build step, transpile, bundle, or minify. Edit `.lua` and copy the folder
+- No build step, no bundler, no transpiler, no CI config. The `.lua` files under
+  `inctrack/` are the deliverable verbatim.
 
 ## Key Dependencies
 
-**Critical (all supplied by Ashita, none vendored):**
-- `common` — Ashita prelude; provides `T{}` tables and the `string:strip_colors()` extension used at `inctrack/inctrack.lua:26,157`
-- `settings` — per-character settings load/save/profile-switch. `inctrack/inctrack.lua:29`
-- `json` — Ashita's `addons/libs/json.lua`; encodes the in-progress run into a single settings string. `inctrack/inctrack.lua:30`
-- `chat` — `chat.header()` / `chat.message()` for coloured console output. `inctrack/inctrack.lua:28`
-- `imgui` — window, text, progress bars, style stack. `inctrack/ui.lua:28`
+**Critical:**
+- `lupa` 2.8 (Python) — embeds real Lua so the suite exercises the *shipped*
+  `parser.lua` / `state.lua` / `ui.lua` / `inctrack.lua` rather than a
+  reimplementation.
+- Ashita v4's own `addons/libs/json.lua` — used at runtime by the addon, and used
+  by the persistence suite (`test_json_roundtrip`, `test/run_tests.py` ~line 2913)
+  to round-trip the real save format. Located next to the chatlogs
+  (`<Ashita>\addons\libs`) or via `INCURSION_ASHITA_LIBS`; absent, that suite skips
+  rather than fails.
 
-**Internal modules (first-party, resolved by `require` from the addon folder):**
-- `parser` (`inctrack/parser.lua`) — pure Lua, stateless, no Ashita dependency. Chat line → event table
-- `state` (`inctrack/state.lua`) — pure Lua; event → run record, owns all timers. Clock is injected (`State.new({ clock = ... })`, `inctrack/state.lua:38`) so tests can drive it
-- `ui` (`inctrack/ui.lua`) — read-only renderer; the only ImGui-dependent module
-
-**Test-only:**
-- `lupa` — Lua-in-Python bridge (`test/run_tests.py:37`)
-- Python stdlib: `os`, `re`, `sys`, `glob`
+**Infrastructure:**
+- None. No database, no network client, no server component.
 
 ## Configuration
 
 **Environment:**
-- No `.env` file and no secrets of any kind. The addon makes no network calls of its own
-- Runtime configuration lives in Ashita's per-character settings, defaults declared at `inctrack/inctrack.lua:34`:
-  - `auto` (bool, default `true`) — automatic show/hide around a run
-  - `locked` (bool, default `false`) — window drag lock
-  - `session` (string, default `''`) — the in-progress run, JSON-encoded. Deliberately a flat string rather than a nested table so the settings merge cannot reshape it on restore
-- Test-only environment variables:
-  - `INCURSION_CHATLOGS` — directory of Ashita chatlogs to replay (`test/run_tests.py:47`); can also be passed as `argv[1]`
-  - `INCURSION_ASHITA_LIBS` — path to Ashita's `addons/libs` so the persistence suite can `dofile` the real `json.lua`. Otherwise inferred as `<chatlogs>/../addons/libs` (`test/run_tests.py:54`). Suite is skipped if not found
+
+Only the test harness reads environment variables; the addon reads none.
+
+| Variable | Read at | Purpose |
+|----------|---------|---------|
+| `INCTRACK_LUA` | `test/run_tests.py` ~393 | Pin the lupa Lua backend (`lua51`..`lua55`, `luajit20`, `luajit21`). Unset = lupa's default. |
+| `INCURSION_CHATLOGS` | `test/run_tests.py` ~100 (`find_logs`) | Directory of Ashita chatlogs for the replay suites. Also positional argv[1]. |
+| `INCURSION_ASHITA_LIBS` | `test/run_tests.py` ~103 (`find_ashita_libs`) | Path to Ashita's `addons/libs` for the `json.lua` round-trip suite. |
+
+No `.env` file exists and none is expected.
+
+**Addon settings:**
+- Persisted through Ashita's `settings` library, per character profile.
+  `default_settings` in `inctrack/inctrack.lua` (~line 39): `auto` (bool),
+  `locked` (bool), `session` (JSON-encoded in-progress run, deliberately a single
+  string so the settings merge cannot reshape the nested table on the way back in).
+- Ashita writes these next to the addon; `.gitignore` excludes `config/` and
+  `settings/` so a checkout run in place never ships them.
 
 **Build:**
-- No build configuration files exist
-- `.gitattributes` enforces LF line endings for `*.lua`, `*.py`, `*.md`
-- `.gitignore` excludes `__pycache__/`, `.venv/`, `chatlogs/`, `*.log`, and the `config/` and `settings/` directories Ashita writes next to the addon when run from a checkout
+- `.gitattributes` pins `*.lua`, `*.py`, `*.md` to LF with `* text=auto`.
+- `.gitignore` excludes `__pycache__/`, `*.pyc`, `.venv/`, editor/OS junk,
+  `chatlogs/` and `*.log` (personal and large — point the suite at them with
+  `INCURSION_CHATLOGS`), and `config/` / `settings/`.
 
 ## Platform Requirements
 
 **Development:**
-- Windows with a CatsEyeXI client install for live testing
-- Python 3 with `lupa` for the offline suite: `python test/run_tests.py`, optionally `python test/run_tests.py "C:\path\to\Ashita\chatlogs"`
-- Chatlogs are named `<Character>_YYYY.MM.DD.log`; the harness reads the character name off the filename (`test/run_tests.py:64`)
+- Python 3.14.5 with `lupa` 2.8 for the suite; a text editor for the Lua.
+- Optional: a real Ashita install for chatlog replay and the `json.lua` suite.
+- The suite runs with no Ashita dependency at all for `parser.lua` and
+  `state.lua`; `ui.lua` and `inctrack.lua` go through the stubbed hosts.
 
 **Production:**
-- Distribution is a folder copy (git clone or release download) into the Ashita addons directory. No installer, no package registry, no CI-published artifact
-- Version is declared in-source at `inctrack/inctrack.lua:22` (`addon.version = '1.1.0'`) and mirrored in `CHANGELOG.md`
+- Windows, Ashita v4, CatsEyeXI client. Install by copying `inctrack/` into
+  `<CatsEyeXI install>\catseyexi-client\Ashita\addons\inctrack\` (must contain all
+  four `.lua` files), then `/addon load inctrack`, optionally added to
+  `<Ashita>\scripts\default.txt`.
+- Read-only with respect to the game: chat stream only, no packet or memory
+  inspection beyond the party member-name lookup.
+
+**Version:** `addon.version = '1.2.0'` (`inctrack/inctrack.lua` ~line 22).
+Licensed MIT (`LICENSE`).
 
 ---
 
-*Stack analysis: 2026-08-28*
+*Stack analysis: 2026-08-29*
