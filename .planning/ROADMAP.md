@@ -121,7 +121,7 @@ That re-derivation is part of this phase, not a regression.
   4. A structurally malformed saved session — a string where `kills_max` belongs, a number inside `objective.mobs` — is discarded whole: `restore()` returns falsy and leaves no run behind, so nothing of that shape ever reaches arithmetic in `ui.lua`.
   5. `/incursion reset` within 30 seconds of a `You have N minutes remaining` line does not seed the next run's clock — `pending_time` is nil after `reset()`.
 
-**Plans**: 1/3 plans executed
+**Plans**: 2/3 plans executed
 
 Plans:
 
@@ -131,7 +131,7 @@ Plans:
   a one-shot fault injector in the ImGui recorder so both named triggers are
   testable
 
-- [ ] 03-02-PLAN.md — HARD-02/03/04: the boss split anchored on the last ` at (`
+- [x] 03-02-PLAN.md — HARD-02/03/04: the boss split anchored on the last ` at (`
   before the coordinate group, mob lists split on comma-space, and the boon tail
   required to carry a non-empty glyph group — each additive over the shipped
   pattern, each accepted on a recorded 127-log survey, and all guarded by a new
@@ -206,7 +206,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. The Net | 3/3 | ✓ Complete | 2026-08-29 |
 | 2. The Three Defects | 2/2 | ✓ Implemented (in-game checks deferred) | 2026-08-29 |
-| 3. Fragile Paths | 1/3 | In Progress|  |
+| 3. Fragile Paths | 2/3 | In Progress|  |
 | 4. Cost and Record | 0/TBD | Not started | - |
 
 ---

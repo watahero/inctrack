@@ -5,16 +5,16 @@ milestone_name: correctness and cost
 current_phase: 3
 current_phase_name: Fragile Paths
 status: executing
-stopped_at: Completed 03-01-PLAN.md -- HARD-01 closed, 13,037 checks over 127 logs, zero known defects
-last_updated: "2026-08-29T05:03:41.420Z"
+stopped_at: Completed 03-02-PLAN.md -- HARD-02/03/04 closed, 13,059 checks over 127 logs, parser still exactly 11819 and generic exactly 1
+last_updated: "2026-08-29T05:30:55.497Z"
 last_activity: 2026-08-29
-last_activity_desc: "02-01 complete: FIX-01 and FIX-02 fixed in state.lua; one xfail (FIX-03) remains"
-state_head: 6508d0b47a7830dc337ba20f2074e56755ca7b4f
+last_activity_desc: "03-02 complete: HARD-02/03/04 tightened in parser.lua on a recorded 127-log survey with all eight invariants zero; parser held at exactly 11819 and generic at exactly 1"
+state_head: 2f8206c52ffd4eaa8864f78317ad284265cc3dd9
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 8
-  completed_plans: 6
+  completed_plans: 7
   percent: 25
 ---
 
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 ## Current Position
 
 Phase: 3 of 4 (Fragile Paths)
-Plan: 1 of 3 in current phase
-Status: 03-01 complete (HARD-01) — 03-02 (HARD-02/03/04) is next
-Last activity: 2026-08-29 — 03-01 complete: ui.render is contained in d3d_present with a conditional stack repair, a report-once latch and two recovery paths; addon suite 83 → 112 checks, both negative controls demonstrated
+Plan: 2 of 3 in current phase
+Status: 03-02 complete (HARD-02/03/04) — 03-03 (HARD-05/06) is next
+Last activity: 2026-08-29 — 03-02 complete: the boss split anchors on the last ' at ' before the coordinate group (1.1.0 shape kept as a fallback), the mob list splits on comma-space and the boon tail requires a non-empty glyph and a non-blank name (neither with a fallback); survey of 127 logs recorded with 8/8 invariants zero; adaptability 20 → 41 plus a new corpus over-reach guard; four negative controls, two of them recorded as limits
 
-Progress: [███░░░░░░░] 33% of phase 3 (1 of 3 plans)
+Progress: [██████░░░░] 67% of phase 3 (2 of 3 plans)
 
 ## Performance Metrics
 
@@ -66,6 +66,7 @@ Progress: [███░░░░░░░] 33% of phase 3 (1 of 3 plans)
 | Phase 02 P01 | 16min | 3 tasks | 2 files |
 | Phase 02 P02 | 22min | 3 tasks | 3 files |
 | Phase 03 P01 | 29min | 3 tasks | 3 files |
+| Phase 3 P02 | 1h | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -101,6 +102,9 @@ Recent decisions affecting current work:
 - [Phase 3]: 03-01: the style colour stack is deliberately not repaired (its only push/pop bracket one ImGui call with no raise site between); the suite asserts all three stacks anyway so a future change goes red rather than being papered over
 - [Phase 3]: 03-01: the bare /incursion while render_off is a re-enable and a return to automatic visibility, not a toggle -- toggling against a window that is not drawn reads as 'hide it'
 - [Phase 3]: 03-01: the recorder's fault injector models the consequence of a raising ImGui binding on demand and never asserts the cause; off by default, disarmed by reset(), and stack-moving entry points raise before they are logged
+- [Phase 3]: HARD-02: the location is the anchor, not the name -- a parenthesised trailing group is structurally identifiable and the name is whatever precedes it, so no list of names is needed
+- [Phase 3]: HARD-02 keeps the 1.1.0 shape as a fallback at all three call sites; HARD-03 and HARD-04 keep none and rest on the survey plus the exact-11819 and exact-1 pins
+- [Phase 3]: Families 2 and 3 of the corpus over-reach guard cannot bite on today's corpus and are recorded as guarding future lines, not present ones
 
 ### Pending Todos
 
@@ -124,8 +128,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-08-29T05:03:41.221Z
-Stopped at: Completed 03-01-PLAN.md -- HARD-01 closed, 13,037 checks over 127 logs, zero known defects
+Last session: 2026-08-29T05:30:55.293Z
+Stopped at: Completed 03-02-PLAN.md -- HARD-02/03/04 closed, 13,059 checks over 127 logs, parser still exactly 11819 and generic exactly 1
 Resume file: None
 
 ## Deferred Verification
