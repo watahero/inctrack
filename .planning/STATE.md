@@ -121,3 +121,28 @@ Items acknowledged and deferred at milestone close, most recent first:
 Last session: 2026-08-28T23:38:40.651Z
 Stopped at: Completed 02-02-PLAN.md -- Phase 2 complete, zero known defects
 Resume file: None
+
+## Deferred Verification
+
+Both items are in-game checks no test suite can close. The user chose to carry on
+to Phases 3-4 rather than pause; neither blocks that work.
+
+| Phase | State | Resume |
+|-------|-------|--------|
+| 2 | verification_deferred_human | /gsd-verify-work 2 |
+
+- **Criterion 4 - the reload clock.** In an Incursion: note the window's clock,
+  `/addon reload inctrack`, stay unloaded ~2 min, reload and read the clock, then
+  wait for the server's next `You have N minutes remaining` line. PASS if they
+  agree within a minute. FAIL if the clock came back unchanged, or jumps down by
+  roughly the downtime when the server's line arrives.
+- **CR-01 - the window frame.** Same session: no title bar and no close control;
+  not resizable by dragging an edge; height still auto-fits as content changes;
+  `/incursion lock` still prevents dragging; `/incursion` still toggles. FAIL on
+  any title bar, any resize handle, a clipped or padded fixed height, or a
+  per-frame console error mentioning `bad argument #2` / `Begin`.
+
+  This one exists because CR-01's fix rests on Ashita's SDK header and a survey of
+  220 `imgui.Begin(` call sites, not on an observed frame. The compiled binding's
+  type handling cannot be inspected, so only a rendered window proves the flags land.
+
