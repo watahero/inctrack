@@ -29,6 +29,7 @@ Suites:
   8. persistence        -- json round trip                                  [libs]
   9. ui                 -- pure helpers, and whole-window render snapshots
  10. addon shell        -- registration, text_in, settings, commands
+ 11. reject cost        -- what a line the addon ignores costs, before/after
 
 ui.lua and inctrack.lua are reached through stubbed hosts (test/stubs.py);
 make_host() builds an isolated runtime with both installed.
@@ -57,6 +58,7 @@ import os
 import re
 import sys
 import glob
+import time
 import importlib
 import traceback
 
@@ -152,6 +154,185 @@ KILLS_BODY = re.compile(r"^New Objective: Defeat \d+ enemies \((.+)\)$")
 # `()` glyph group dropped a boon permanently.
 BOON_REF = re.compile(r"^(\S+) gains the effect of (.*?) \(([^)]*)\): (.+)$")
 BOON_PHRASE = " gains the effect of "
+
+
+# --------------------------------------------------------------------------
+# PERF-04: the reject-path corpus, and the head-of-phase baseline
+# --------------------------------------------------------------------------
+
+# Chat lines the addon does not care about, written out here rather than read
+# from a log, so the figure prints on a machine with no chatlogs and no Ashita
+# install (COVR-04). Invented names only, in the server's established wording,
+# exactly as the rest of the harness does -- the addon must know none of them.
+#
+# Three groups, reported separately, because they cost different things:
+#
+#   plain    -- ordinary combat, party and system chat with no colour codes.
+#               This is the group PERF-01 makes free.
+#   coloured -- the same shapes carrying Ashita's colour-code marker bytes.
+#               The gate declines to judge a line with a code in it, so these
+#               keep costing exactly what they cost today, and never more.
+#   stamped  -- carrying the '[HH:MM:SS] ' prefix a timestamp plugin adds. The
+#               chatlogs show one active in this setup, so the reject path
+#               meets this shape in life.
+#
+# Every line here is asserted to return nil from the shipped parser, so the
+# benchmark can never be won by measuring a path that skipped real work.
+CC_A = "\x1e\x51"      # a colour-code marker byte plus its one payload byte
+CC_B = "\x1f\x02"
+
+REJECT_PLAIN = (
+    "Godwen hits the Nest Skitterer for 42 points of damage.",
+    "The Nest Skitterer misses Godwen.",
+    "Godwen uses Fast Blade.",
+    "Godwen defeats the Nest Drone.",
+    "Rialla casts Cure III on Godwen.",
+    "Godwen obtains 137 gil.",
+    "Godwen recovers 24 MP.",
+    "Rialla >> pulling the next group, hold here a moment",
+    "Tomabi : anyone free for a run in an hour or so",
+    "The Nest Broodguard readies Cocoon.",
+    "Godwen's Fast Blade hits the Nest Skitterer for 118 points of damage.",
+    "You cannot use that command at this time.",
+)
+
+# A code at the head and a second one dropped inside the line -- which is
+# exactly where a code defeats an anchored test on raw text, and is the reason
+# the gate declines to judge a coloured line at all.
+REJECT_COLOURED = tuple(
+    CC_A + line[:5] + CC_B + line[5:] for line in REJECT_PLAIN[:6])
+
+REJECT_STAMPED = tuple(
+    "[21:47:0%d] %s" % (i, line) for i, line in enumerate(REJECT_PLAIN[6:]))
+
+# The colour-free half: the lines PERF-01 is entitled to reject outright.
+REJECT_FREE = REJECT_PLAIN + REJECT_STAMPED
+REJECT_CORPUS = REJECT_PLAIN + REJECT_COLOURED + REJECT_STAMPED
+
+# Chosen so the slower shape takes upwards of 0.2s a pass while the whole
+# benchmark -- two shapes, best of three, plus four counting hosts -- stays
+# well under the five seconds it is allowed to add to a run.
+REJECT_ITERATIONS = 3000
+
+# The head-of-Phase-4 baseline, taken before PERF-01 changed anything: the
+# old shape below, which is the reject path as Phase 3 shipped it.
+#
+# Provenance, never a threshold. A rate is a fact about one machine on one
+# afternoon, so nothing here is ever asserted against it and nothing may
+# compare it with a figure from another machine. The suite's actual checks are
+# the deterministic counters, plus one same-run ratio between two shapes
+# measured side by side on the same corpus.
+REJECT_BASELINE = {
+    "date": "2026-08-29",
+    "commit": "a6a3577",           # the parser exactly as Phase 3 left it
+    "backend": "Lua 5.5",          # lupa's default build on this machine
+    "python": "3.14.5",
+    "lines_per_second": 285562,
+    "us_per_line": 3.502,
+}
+
+
+def coloured(line):
+    """True when the line carries an Ashita colour-code marker byte."""
+    return "\x1e" in line or "\x1f" in line
+
+
+# The two shapes, driven from inside Lua: a Python-to-Lua call per line would
+# swamp what is being measured, which is a handful of string allocations. Both
+# reuse one event table with only the message rewritten, so neither pays for a
+# table the other does not, and both take the same corpus and iteration count.
+BENCH_CHUNK = """
+--[[
+* The old shape -- the reject path as Phase 3 left it, copied rather than
+* called so the baseline survives the change PERF-01 makes to the real one.
+*
+* This is the head of parser.parse: trim, the timestamp loop, the empty check
+* and the anchored cheap rejection, transcribed from inctrack/parser.lua at
+* commit a6a3577, the head of Phase 4. That transcription is what makes the
+* recorded figure a baseline of the parser as Phase 3 shipped it rather than a
+* coincidence.
+*
+* The corpus is entirely rejects, so the two matcher arrays are never reached
+* and this head is the whole of the cost. Nothing below the rejection is
+* copied, and nothing here is ever called by the addon.
+]]--
+local function __bench_parse_head(line)
+    if type(line) ~= 'string' then
+        return nil;
+    end
+
+    local s = (line:gsub('^%s+', ''):gsub('%s+$', ''));
+
+    while true do
+        local rest, n = s:gsub('^%[%d%d:%d%d:%d%d%]%s+', '', 1);
+        if n == 0 then
+            break;
+        end
+        s = rest;
+    end
+
+    if s == '' then
+        return nil;
+    end
+
+    if not (s:find('^Incursion %[')
+        or s:find('^New Objective: ')
+        or s:find('^Bonus Objective: ')
+        or s:find('^%(Boss: ')
+        or s:find('^You have %d')
+        or s:find('incursion points%.$')
+        or s:find('): ', 1, true)) then
+        return nil;
+    end
+
+    return nil;
+end
+
+-- The text_in handler as Phase 3 left it, wrapped around that head. The pcall
+-- and the closure it allocates are part of what a line costs, so they stay.
+local function __bench_old_line(e)
+    return pcall(function ()
+        local line = e.message;
+        if line == nil or line == '' then
+            return;
+        end
+        line = line:strip_colors();
+        local event = __bench_parse_head(line);
+        if event == nil then
+            return;
+        end
+    end);
+end
+
+local function __bench_event()
+    return { mode = 0, indent = 0, message = '', injected = false };
+end
+
+function __bench_old(corpus, iterations)
+    local e = __bench_event();
+    local n = #corpus;
+    for _ = 1, iterations do
+        for i = 1, n do
+            e.message = corpus[i];
+            __bench_old_line(e);
+        end
+    end
+end
+
+-- The new shape -- the addon's own registered handler, so what is timed is
+-- the shipped path including its pcall, not a second copy of it.
+function __bench_new(corpus, iterations)
+    local handler = __host_events['text_in'];
+    local e = __bench_event();
+    local n = #corpus;
+    for _ = 1, iterations do
+        for i = 1, n do
+            e.message = corpus[i];
+            handler(e);
+        end
+    end
+end
+"""
 
 
 # Which Lua sits behind lupa is not the addon's choice and is not stable
@@ -329,6 +510,25 @@ def load_lines(logdir):
     return out
 
 
+def at(path, text, lineno=None):
+    """A log location and the text found there, safe for any console.
+
+    Every failure message in the log-driven suites embeds text the server
+    sent, and a boon line carries the glyph's raw high bytes, which decode to
+    U+FFFD. Printing that on a cp1252 console raises *inside* Result.report(),
+    turning the readable red line the run owed into a traceback -- and the
+    machines that have chatlogs are exactly the machines with that console.
+
+    So the text always goes through ascii(). Phase 3 did this to its own six
+    new messages one at a time and left the pre-existing ones under its scope
+    fence; this is the one helper all of them share, so a message added later
+    is escaped by using it rather than by remembering to.
+    """
+    if lineno is None:
+        return "%s %s" % (path, ascii(text))
+    return "%s:%d  %s" % (path, lineno, ascii(text))
+
+
 def feed(state, parser, lines):
     for line in lines:
         ev = parser.parse(line)
@@ -480,7 +680,7 @@ def test_parser(lines, parser):
 
         if MUST_PARSE.match(line):
             coverage.check(ev is not None,
-                           "unparsed %s:%d  %r" % (path, lineno, line))
+                           "unparsed %s" % at(path, line, lineno))
 
         # Family 4 is the only one that must look at lines the parser
         # declined -- a boon claimed when the tail is absent and a boon missed
@@ -518,8 +718,8 @@ def test_parser(lines, parser):
         # If one fires on a real line, a specific pattern has regressed and the
         # window would lose a progress bar or a coordinate.
         if ev["generic"]:
-            dormant.check(False, "generic %s on %s:%d  %r"
-                          % (ev["t"], path, lineno, line))
+            dormant.check(False, "generic %s on %s"
+                          % (ev["t"], at(path, line, lineno)))
             generics[ev["t"]] = generics.get(ev["t"], 0) + 1
             continue
 
@@ -653,10 +853,12 @@ def test_replay(lines, lua, parser, State, player):
 
 def verify_run(active, state, res, path):
     run = state.snapshot(state)
-    tag = "%s %s" % (path, active["instance"])
+    # The instance name came off a log line, so it goes through the same
+    # console-safe formatting as the parser suites' locations do.
+    tag = at(path, active["instance"])
 
     res.check(run["instance"] == active["instance"],
-              "%s: instance %r" % (tag, run["instance"]))
+              "%s: instance %s" % (tag, ascii(run["instance"])))
     res.check(int(run["points"]) == active["points"],
               "%s: points %d != %d" % (tag, int(run["points"]), active["points"]))
     # Re-derived from the raw text, never from anything the state machine
@@ -1506,6 +1708,27 @@ def test_future_content(lua, parser, State):
     they stand in for content added later, and must still reach the window.
     """
     res = Result("adaptability: unseen content still tracked")
+
+    # --- the failure message survives the console it is printed on --------
+    #
+    # at() is what the log-driven suites format their failure messages with,
+    # and those suites only run on a machine that has chatlogs -- which is the
+    # machine whose console is cp1252 and whose logs carry a boon glyph that
+    # decodes to U+FFFD. So the helper is exercised here instead, in a suite
+    # that runs everywhere, on the byte that would take Result.report() down.
+    # A traceback in place of a readable red line is the failure being
+    # prevented; the assertion is simply that encoding does not raise.
+    try:
+        at("Godwen_2026.08.29.log",
+           "Godwen gains the effect of Ward (�): STR+5", 1234
+           ).encode("cp1252")
+        encodable = True
+    except UnicodeEncodeError:
+        encodable = False
+    res.check(encodable,
+              "a failure message carrying a boon glyph cannot be printed on a "
+              "cp1252 console, so the run would die with a traceback where a "
+              "readable red line was owed")
 
     # A brand new instance with a new difficulty tier, more phases than any
     # instance has today, and an unusually large kill cap.
@@ -4104,6 +4327,134 @@ def test_addon_shell():
     return res
 
 
+# --------------------------------------------------------------------------
+# 11. what a line the addon ignores costs, before and after
+# --------------------------------------------------------------------------
+
+def bench_host(count=False):
+    """A loaded host with the two benchmark shapes installed.
+
+    `count` installs the opt-in gsub counter. Counters and stopwatch never
+    share a host: the counter is a Lua function standing in front of a C one,
+    so a counted host is a slower host and a timed one must be unwrapped.
+    """
+    host = loaded_host()
+    host.lua.execute(BENCH_CHUNK)
+    if count:
+        host.count_gsub()
+    return host
+
+
+def bench_time(host, name, corpus, iterations, passes=3):
+    """Seconds for the best of `passes` runs of one shape over the corpus.
+
+    Timed from Python: os.clock and os.time are both stubbed inside the host
+    (they have to be, for the run timers to be deterministic), so the only
+    honest stopwatch is out here.
+    """
+    fn = host.lua.globals()[name]
+    table = host.lua.table_from(list(corpus))
+    best = None
+    for _ in range(passes):
+        started = time.perf_counter()
+        fn(table, iterations)
+        elapsed = time.perf_counter() - started
+        if best is None or elapsed < best:
+            best = elapsed
+    return best
+
+
+def bench_count(name, corpus):
+    """(strip_colors calls, gsub calls) for one pass of one shape."""
+    host = bench_host(count=True)
+    strip_before = host.strip_colors_calls
+    gsub_before = host.gsub_calls
+    host.lua.globals()[name](host.lua.table_from(list(corpus)), 1)
+    return (host.strip_colors_calls - strip_before,
+            host.gsub_calls - gsub_before)
+
+
+def test_reject_cost(parser, backend):
+    """PERF-04: what a chat line the addon ignores costs, before and after.
+
+    Two shapes over one fixed corpus, in one run, on the same machine:
+
+      old -- the reject path as Phase 3 left it, copied into the harness at
+             commit a6a3577: strip_colors on every line, then trim, then the
+             timestamp loop, then the anchored rejection.
+      new -- the addon's own registered text_in handler, whatever it does now.
+
+    Before PERF-01 lands these are the same code and the two figures agree;
+    afterwards they do not, and the gap is what the phase bought.
+
+    No rate is ever an acceptance threshold -- a rate is a fact about a
+    machine, and the recorded baseline is provenance, not a bar to clear. The
+    checks here are the deterministic counters plus, once there is a
+    difference to measure, one same-run ratio between the two shapes.
+    """
+    res = Result("cost: the non-Incursion reject path")
+
+    # The pin that keeps every figure below honest. A corpus line the parser
+    # actually recognises would be measured doing real work in one shape and
+    # skipping it in the other, and the ratio would be meaningless.
+    parsed = [line for line in REJECT_CORPUS if parser.parse(line) is not None]
+    res.check(not parsed,
+              "the benchmark corpus is not all rejects, so these figures "
+              "compare a path that skipped real work with one that did it: %s"
+              % ", ".join(ascii(line) for line in parsed))
+
+    lines_per_pass = len(REJECT_CORPUS) * REJECT_ITERATIONS
+    timing = {}
+    for name in ("__bench_old", "__bench_new"):
+        timing[name] = bench_time(bench_host(), name,
+                                  REJECT_CORPUS, REJECT_ITERATIONS)
+
+    rate = {k: lines_per_pass / v for k, v in timing.items()}
+    micros = {k: v * 1e6 / lines_per_pass for k, v in timing.items()}
+    ratio = rate["__bench_new"] / rate["__bench_old"]
+
+    counts = {}
+    for name in ("__bench_old", "__bench_new"):
+        counts[(name, "free")] = bench_count(name, REJECT_FREE)
+        counts[(name, "colour")] = bench_count(name, REJECT_COLOURED)
+
+    res.note("corpus: %d lines (%d colour-free, %d coloured), %d iterations a "
+             "pass, best of 3"
+             % (len(REJECT_CORPUS), len(REJECT_FREE), len(REJECT_COLOURED),
+                REJECT_ITERATIONS))
+    # The backend is named because the rates depend on it entirely: the same
+    # corpus through luajit21 and through Lua 5.5 gives two different numbers
+    # for the same code, which is the whole reason no rate is a threshold.
+    res.note("backend: %s%s"
+             % (backend,
+                " (INCTRACK_LUA)" if os.environ.get("INCTRACK_LUA") else ""))
+    res.note("old shape (Phase 3): %s lines/s, %.3f us/line"
+             % (thousands(rate["__bench_old"]), micros["__bench_old"]))
+    res.note("new shape (shipped):  %s lines/s, %.3f us/line"
+             % (thousands(rate["__bench_new"]), micros["__bench_new"]))
+    res.note("new/old: %.2fx" % ratio)
+    for group, label in (("free", "colour-free"), ("colour", "coloured")):
+        n = len(REJECT_FREE if group == "free" else REJECT_COLOURED)
+        old_s, old_g = counts[("__bench_old", group)]
+        new_s, new_g = counts[("__bench_new", group)]
+        res.note("per %s rejected line -- old: %.2f strip_colors, %.2f gsub; "
+                 "new: %.2f strip_colors, %.2f gsub"
+                 % (label, old_s / n, old_g / n, new_s / n, new_g / n))
+    res.note("recorded baseline (%s, commit %s, %s, Python %s): %s lines/s, "
+             "%.3f us/line -- provenance, not a threshold"
+             % (REJECT_BASELINE["date"], REJECT_BASELINE["commit"],
+                REJECT_BASELINE["backend"], REJECT_BASELINE["python"],
+                thousands(REJECT_BASELINE["lines_per_second"]),
+                REJECT_BASELINE["us_per_line"]))
+
+    return res
+
+
+def thousands(n):
+    """A rate a human can read at a glance, without a locale."""
+    return "{:,}".format(int(round(n)))
+
+
 def run_suite(label, fn, *args):
     """Run one suite, turning a crash into a reported failure.
 
@@ -4139,7 +4490,8 @@ def main():
     lua, parser, State = make_lua()
 
     print("inctrack tests")
-    print("  lua: %s%s" % (getattr(lua, "lua_implementation", "unknown"),
+    backend = getattr(lua, "lua_implementation", "unknown")
+    print("  lua: %s%s" % (backend,
                            " (INCTRACK_LUA)" if os.environ.get("INCTRACK_LUA")
                            else ""))
 
@@ -4169,6 +4521,10 @@ def main():
                             lua, parser, State, libs))
     suites.extend(run_suite("ui", test_ui))
     suites.extend(run_suite("addon", test_addon_shell))
+    # Last, because it is the only suite that reads a stopwatch and every
+    # suite before it has finished competing for the machine by the time it
+    # runs.
+    suites.extend(run_suite("reject cost", test_reject_cost, parser, backend))
 
     ok = True
     for s in suites:

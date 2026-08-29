@@ -862,6 +862,41 @@ function string.args(s)
 end
 """
 
+# --------------------------------------------------------------------------
+# The opt-in allocation counter
+# --------------------------------------------------------------------------
+
+#[[
+# An opt-in counter over string.gsub, for PERF-01/04.
+#
+# Every gsub in the reject path allocates: strip_colors does two, trim does
+# two more, and the timestamp loop does at least one. Counting them is how
+# "a line the addon ignores costs nothing" becomes an assertion rather than a
+# claim, alongside __host_strip_calls.
+#
+# Wrapping the `string` table is enough to catch method syntax as well: s:gsub
+# resolves through the string metatable's __index, which *is* this table, so
+# every s:gsub(...) inside parser.lua and inctrack.lua is counted too.
+#
+# It is opt-in and installed by hand because it is a Lua function standing in
+# front of a C one and it costs time. A host that is being timed must run the
+# unwrapped gsub; the counting pass and the timing pass are separate passes on
+# separate hosts.
+#
+# Installing twice would wrap the wrapper and double every count, so the raw
+# handle doubles as the guard.
+#]]
+GSUB_COUNTER_CHUNK = """
+if __host_gsub_raw == nil then
+    __host_gsub_calls = 0;
+    __host_gsub_raw = string.gsub;
+    string.gsub = function (...)
+        __host_gsub_calls = __host_gsub_calls + 1;
+        return __host_gsub_raw(...);
+    end
+end
+"""
+
 JSON_CHUNK = """
 --[[
 * A stubbed pure-Lua json, so the new suites need no Ashita install (D-04).
@@ -1193,6 +1228,8 @@ class AshitaHost:
     tick(seconds)       -- set the monotonic clock
     wall(seconds)       -- set the wall clock, as an offset from EPOCH
     strip_colors_calls  -- how many times string:strip_colors() ran
+    count_gsub()        -- install the opt-in string.gsub counter
+    gsub_calls          -- how many gsubs ran, once count_gsub() has been called
     """
 
     def __init__(self, lua, player="", profile=None):
@@ -1265,6 +1302,30 @@ class AshitaHost:
     @property
     def strip_colors_calls(self):
         return int(self._g("__host_strip_calls"))
+
+    def count_gsub(self):
+        """Install the opt-in string.gsub counter in this host.
+
+        Never on by default and never on a host that is being timed: it is a
+        Lua function standing in front of a C one, so it changes what a
+        stopwatch reads. Counting and timing are separate passes.
+        """
+        self.lua.execute(GSUB_COUNTER_CHUNK)
+
+    @property
+    def gsub_calls(self):
+        """How many gsubs have run in this host since count_gsub().
+
+        Raises rather than returning 0 when the counter was never installed,
+        so a caller cannot read a zero that means 'not measured' as a zero
+        that means 'nothing allocated' -- which is precisely the claim
+        PERF-01 rests on.
+        """
+        if self._g("__host_gsub_raw") is None:
+            raise RuntimeError(
+                "this host has no gsub counter installed, so its gsub count "
+                "is unmeasured rather than zero; call host.count_gsub() first")
+        return int(self._g("__host_gsub_calls"))
 
     @property
     def profile_callback(self):
