@@ -172,7 +172,7 @@ shipped behaviour.
 - Never call `os.clock()` directly in `state.lua`; go through `self:now()`. The addon injects `now()` from `inctrack.lua`; tests inject `__clockfn`.
 - Never `require('ashita...')`, `imgui`, `settings`, or `json` from `parser.lua` or `state.lua` — it breaks the whole test suite.
 - Matchers are added by appending a closure to the `specific` array in the correct order. Ordering is a documented contract: `bonus_progress` before `phase`, `objective_kills` before `objective_boss`, chest/count/named bonus before generic bonus. Generic matchers always run last so they never shadow a specific one.
-- `State:apply(e)` returns `true` when the run changed, so the caller knows to persist. Keep that contract in new branches (`self.dirty = true; return true;`).
+- `State:apply(e)` returns `true` when the run changed, so the caller knows to persist. Keep that contract in new branches (`return true;` on every path that mutated the run). That boolean is the whole mechanism -- `state.lua` holds no dirty flag; the write is decided by `MUST_SAVE` plus the five-second throttle in `inctrack.lua`.
 
 ## Error Handling
 
@@ -261,7 +261,7 @@ shipped behaviour.
 ### Parser two-tier flow
 
 - Exactly one mutable run record lives at `state.run`; there is no history and no event log.
-- `state.dirty` is set by every mutating branch but the shell currently drives persistence off `apply()`'s boolean return rather than reading `dirty`.
+- The shell drives persistence off `apply()`'s boolean return. `state.lua` keeps no dirty flag of its own: one was carried until 1.2.1, written by every mutating branch and read by nothing.
 
 ## Key Abstractions
 

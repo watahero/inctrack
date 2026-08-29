@@ -38,7 +38,6 @@ function State.new(opts)
     self.clock  = opts.clock or os.clock;
     self.player = opts.player;
     self.run    = nil;
-    self.dirty  = false;
     return self;
 end
 
@@ -91,7 +90,6 @@ function State:reset()
     -- survive the player throwing the run away in between, which would seed
     -- the next run's clock with the old one's number.
     self.pending_time = nil;
-    self.dirty = true;
 end
 
 --[[
@@ -137,7 +135,6 @@ function State:apply(e)
             self.run.time_sync = self.pending_time.at;
         end
         self.pending_time = nil;
-        self.dirty = true;
         return true;
     end
 
@@ -158,7 +155,6 @@ function State:apply(e)
         -- party may have finished the phase, killed the boss, or moved on
         -- entirely while we were gone, and none of that is replayed to us.
         self:desync();
-        self.dirty = true;
         return true;
     end
 
@@ -238,7 +234,6 @@ function State:apply(e)
         -- A kill count is live information, so we are in step on progress even
         -- if the mob list is still only probable.
         run.desynced = false;
-        self.dirty = true;
         return true;
     end
 
@@ -248,7 +243,6 @@ function State:apply(e)
         run.kills_max = e.count;
         run.note = nil;
         resync(run);
-        self.dirty = true;
         return true;
     end
 
@@ -260,7 +254,6 @@ function State:apply(e)
         end
         run.note = nil;
         resync(run);
-        self.dirty = true;
         return true;
     end
 
@@ -271,14 +264,12 @@ function State:apply(e)
         run.kills_max = nil;
         run.note = nil;
         resync(run);
-        self.dirty = true;
         return true;
     end
 
     if t == 'boss_hint' then
         run.next_boss = { name = e.name, loc = e.loc };
         resync(run);
-        self.dirty = true;
         return true;
     end
 
@@ -292,7 +283,6 @@ function State:apply(e)
             expires_at = e.minutes and (self:now() + e.minutes * 60) or nil,
             done       = false,
         };
-        self.dirty = true;
         return true;
     end
 
@@ -314,7 +304,6 @@ function State:apply(e)
             run.bonus.expires_at = nil;
         end
 
-        self.dirty = true;
         return true;
     end
 
@@ -327,7 +316,6 @@ function State:apply(e)
             run.bonus.cur = run.bonus.max;
         end
         run.bonus.expires_at = nil;
-        self.dirty = true;
         return true;
     end
 
@@ -338,7 +326,6 @@ function State:apply(e)
             label = e.label, cur = e.cur, max = e.max,
             done = e.cur >= e.max, at = self:now(),
         };
-        self.dirty = true;
         return true;
     end
 
@@ -354,20 +341,17 @@ function State:apply(e)
                 label = e.label, done = true, at = self:now(),
             };
         end
-        self.dirty = true;
         return true;
     end
 
     if t == 'generic_note' then
         run.note = { text = e.text, at = self:now() };
-        self.dirty = true;
         return true;
     end
 
     if t == 'time' then
         run.time_left = e.minutes * 60;
         run.time_sync = self:now();
-        self.dirty = true;
         return true;
     end
 
@@ -390,7 +374,6 @@ function State:apply(e)
             run.kills_max  = nil;
         end
 
-        self.dirty = true;
         return true;
     end
 
@@ -404,12 +387,10 @@ function State:apply(e)
         for i = 1, #run.boons do
             if run.boons[i].name == e.name then
                 run.boons[i].stats = e.stats;
-                self.dirty = true;
                 return true;
             end
         end
         run.boons[#run.boons + 1] = { name = e.name, stats = e.stats };
-        self.dirty = true;
         return true;
     end
 
@@ -443,7 +424,6 @@ function State:apply(e)
         run.note          = nil;
         run.extra         = {};
         run.hide_at       = self:now() + LINGER_SECONDS;
-        self.dirty = true;
         return true;
     end
 

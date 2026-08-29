@@ -27,7 +27,7 @@ are enforced by review and, where countable, by the `record:` suite in
   (`line`, `run`, `event`, `blob`), suffixed rather than prefixed for pairs:
   `kills_cur` / `kills_max`, `save_due` / `save_at` / `save_retry_at`.
 - Boolean latches read as past-tense facts: `render_off`, `render_ok`,
-  `parse_told`, `save_told`, `dirty`, `desynced`, `points_partial`.
+  `parse_told`, `save_told`, `desynced`, `points_partial`.
 
 **Constants:**
 - `UPPER_SNAKE` file-scope locals with the unit in the name:
