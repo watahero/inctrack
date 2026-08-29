@@ -136,6 +136,10 @@ local function reset(quiet)
     -- from before the clear would put the run straight back over it on the
     -- next frame.
     incursion.save_due = false;
+    -- The boon shorthand memoised for the run belongs to a run that is gone.
+    -- The window cannot notice this for itself: after a reset there is no run
+    -- and it stops being drawn at all.
+    ui.forget();
     incursion.settings.session = '';
     settings.save();
     if not quiet then
@@ -556,6 +560,9 @@ settings.register('settings', 'incursion_settings_update', function (s)
         -- And a write owed by the old character must not land in the new
         -- character's settings, which is where the next frame would put it.
         incursion.save_due = false;
+        -- And the boon shorthand memoised for the old character's run, for
+        -- the same reason as the reset path: it belongs to nobody now.
+        ui.forget();
         -- nil makes the text_in handler re-fetch the name on the next event,
         -- once the new character actually exists in memory.
         incursion.state:set_player(nil);

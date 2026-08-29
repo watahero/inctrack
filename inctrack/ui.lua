@@ -331,8 +331,54 @@ local function replace_plain(s, from, to)
     return table.concat(out);
 end
 
--- Memoised: the same few strings are shortened every frame.
+--[[
+* Memoised: the same few strings are shortened every frame.
+*
+* Bounded, and three separate judgements went into how:
+*
+* Why a bound at all. The key is text the server chose, and this addon lives
+* as long as the client does. Nothing about a stat string is bounded by
+* anything the addon controls, so without a cap this table grows for a whole
+* play session.
+*
+* Why the whole cache rather than an eviction policy. A run's boon stat
+* strings are few and repeat every frame, so an LRU is more code -- code on
+* the render path -- for no measurable gain on real traffic. Dropping the lot
+* costs one re-shorten per live string on the next frame that draws it.
+*
+* Why 64. A run's boons are a handful, and 64 is far above any run the
+* 127-log corpus holds, so the drop can only ever fire on input the server
+* never sent. A bound that is reached in ordinary play would be trading a
+* real cost for a hypothetical one.
+*
+* short_clear() empties this table in place and never assigns a fresh one.
+* ui.lua's file-scope locals are reachable only by upvalue reflection, so a
+* replaced table would leave any handle taken on it an orphan, measuring a
+* cache the addon no longer uses.
+]]--
+local SHORT_CACHE_MAX = 64;
 local short_cache = {};
+local short_held = 0;
+
+local function short_clear()
+    for key in pairs(short_cache) do
+        short_cache[key] = nil;
+    end
+    short_held = 0;
+end
+
+--[[
+* Drop everything memoised for a run that is over.
+*
+* The second thing this file has ever exported, and it has to be: it cannot
+* be inferred from inside render. After a reset there is no run, so the shell
+* stops calling render at all and the draw function never gets a frame in
+* which to notice that what it cached belongs to nobody. The shell knows; the
+* window cannot.
+]]--
+function ui.forget()
+    short_clear();
+end
 
 local function shorten(stats)
     local hit = short_cache[stats];
@@ -347,7 +393,13 @@ local function shorten(stats)
     -- 'Skills +10' -> 'Skills+10'; ' / ' -> single space.
     s = s:gsub('%s+([%+%-])', '%1'):gsub('%s*/%s*', ' ');
 
+    -- At the cap, drop the lot and start again, so the table never holds more
+    -- than SHORT_CACHE_MAX entries on any call.
+    if short_held >= SHORT_CACHE_MAX then
+        short_clear();
+    end
     short_cache[stats] = s;
+    short_held = short_held + 1;
     return s;
 end
 
