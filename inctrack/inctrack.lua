@@ -119,6 +119,40 @@ local function reset(quiet)
     end
 end
 
+--[[
+* Take up a saved run, or say why it could not be taken up.
+*
+* Returns the decoded blob when the run was resumed and nil otherwise; the
+* caller clears the stored string on nil, so an unusable blob is not retried
+* on every load forever.
+*
+* The refusal used to be silent, which was defensible while the only ways to
+* fail were unreadable JSON, a finished run and a three-hour-old blob. The
+* structural validator widened it to every shape mismatch, and what the
+* player sees on a rejection is a mid-run reload where the HUD comes back
+* with nothing and then bootstraps a fresh run from the next Incursion line:
+* phase nil, no boons, elapsed counting from zero, and no 'reconnected'
+* marking on any of it, because a bootstrapped run is not a desynced one.
+* That is a window showing numbers the server never sent, unmarked -- the one
+* thing this addon exists not to do.
+*
+* Silence is still right for a run that had already finished. restore()
+* refuses those deliberately, there is nothing left to resume, and saying a
+* run 'could not be resumed' when the player watched it end would be the same
+* fault pointed the other way.
+]]--
+local function resume(saved)
+    local ok, blob = pcall(json.decode, saved);
+    if ok and type(blob) == 'table' and incursion.state:restore(blob) then
+        return blob;
+    end
+    if not (ok and type(blob) == 'table' and blob.finished) then
+        printf('Saved run could not be resumed -- unreadable, too old, or '
+               .. 'not a shape this build knows. Starting fresh.');
+    end
+    return nil;
+end
+
 -- Whether the window should be drawn right now.
 local function visible()
     if incursion.override ~= nil then
@@ -146,11 +180,12 @@ ashita.events.register('load', 'incursion_load', function ()
     end
 
     -- Resume a run that was in progress when we were last unloaded. A corrupt
-    -- or stale blob is discarded rather than half-applied.
+    -- or stale blob is discarded rather than half-applied, and the discard is
+    -- said out loud: see resume().
     local saved = incursion.settings.session;
     if type(saved) == 'string' and saved ~= '' then
-        local ok, blob = pcall(json.decode, saved);
-        if ok and type(blob) == 'table' and incursion.state:restore(blob) then
+        local blob = resume(saved);
+        if blob ~= nil then
             printf('Resumed run in %s.', tostring(blob.instance));
         else
             incursion.settings.session = '';
@@ -419,12 +454,12 @@ settings.register('settings', 'incursion_settings_update', function (s)
         incursion.state:set_player(nil);
 
         -- The new profile may hold that character's own in-progress run.
+        -- Same rule as the load path: an unusable blob is cleared rather than
+        -- retried, and the player is told rather than left with a HUD that
+        -- came back empty for no stated reason.
         local saved = s.session;
-        if type(saved) == 'string' and saved ~= '' then
-            local ok, blob = pcall(json.decode, saved);
-            if not (ok and type(blob) == 'table' and incursion.state:restore(blob)) then
-                s.session = '';
-            end
+        if type(saved) == 'string' and saved ~= '' and resume(saved) == nil then
+            s.session = '';
         end
     end
     settings.save();

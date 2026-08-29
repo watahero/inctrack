@@ -3406,8 +3406,10 @@ def test_addon_shell():
     # protects the restore() call itself at either of its two call sites, so
     # what the shape costs is decided entirely inside state.lua.
     #
-    # A discarded session is an ordinary outcome, not a fault to report at the
-    # player: the run is gone either way and there is nothing they can do.
+    # A discard is reported, and reported as a discard: not as a fault, not
+    # as a resume. The player is the only one who can tell "your run is gone"
+    # from "the HUD has not caught up yet", and the difference is a whole
+    # Incursion's boons and points.
     WRONG_SHAPE = ('{"version":2,"instance":"%s","phase":1,"kills_cur":3,'
                    '"kills_max":15,"time_left":"lots","elapsed":42,'
                    '"boons":[],"extra":{}}' % SHELL_INSTANCE)
@@ -3439,6 +3441,60 @@ def test_addon_shell():
     res.check(bent is not None and not bent_noise,
               "a discarded session was reported at the player as a fault, or "
               "reported as resumed when it was not: %r" % (bent_noise,))
+
+    # WR-05. Silence here is not neutral. The HUD comes back with nothing,
+    # and the next Incursion-tagged line bootstraps a fresh run: phase nil,
+    # phases_cleared 0, elapsed counting from zero, and no 'reconnected --
+    # awaiting update' marking on any of it, because a bootstrapped run is
+    # not a desynced one. That is a window full of numbers the server never
+    # sent, unmarked.
+    bent_told = ([line for line in bent.chat if "could not be resumed" in line]
+                 if bent is not None else [])
+    res.check(len(bent_told) == 1,
+              "a saved run was thrown away on load and the player was told "
+              "%d times, not once -- what they see instead is a HUD that "
+              "came back empty for no stated reason: %r"
+              % (len(bent_told), bent.chat if bent is not None else None))
+
+    # And the one refusal that is not a loss stays quiet. restore() turns a
+    # finished run away on purpose -- there is nothing left to resume -- and
+    # every completed Incursion leaves exactly such a blob behind, so
+    # complaining here would put a false alarm on every login after a run.
+    done = loaded_host()
+    done.fire_text_in(begins())
+    done.fire_text_in(phase_line(1, 3))
+    done.fire_text_in("Incursion [%s] Complete! (Normal) Time: 48m 44s"
+                      % SHELL_INSTANCE)
+    done.fire("unload")
+    res.check(done.settings["session"] != "",
+              "the finished run was never written down, so the case below is "
+              "not the case it was written for")
+    after_done = loaded_host(profile={"session": done.settings["session"]})
+    res.check(not [line for line in after_done.chat
+                   if "could not be resumed" in line],
+              "logging in after finishing an Incursion complained that a run "
+              "could not be resumed, when nothing was lost: %r"
+              % (after_done.chat,))
+    res.check(shell_run(after_done) is None,
+              "a finished run was resumed on the next load")
+    res.check(after_done.settings["session"] == "",
+              "the finished run was kept and will be retried on every load")
+
+    # The profile-switch path answers the same way: it is the same loss, on a
+    # path a player reaches by logging in on a character mid-run.
+    told = loaded_host()
+    told.fire_text_in(begins())
+    chat_before = len(told.chat)
+    told.switch_profile({"session": WRONG_SHAPE})
+    said = [line for line in told.chat[chat_before:]
+            if "could not be resumed" in line]
+    res.check(len(said) == 1,
+              "a character change whose saved run could not be read said "
+              "nothing about it: the new character's HUD came up empty with "
+              "no reason given (%r)" % (told.chat[chat_before:],))
+    res.check(told.settings["session"] == "",
+              "the unusable run carried over to the new profile and will be "
+              "retried on every load: %r" % (told.settings["session"],))
 
     # --- the player's name, which may not exist yet at load ---------------
 
