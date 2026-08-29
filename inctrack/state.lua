@@ -84,6 +84,13 @@ end
 
 function State:reset()
     self.run   = nil;
+    -- A reset is the player declaring the run over, and a sync captured
+    -- before that moment describes an instance they are no longer in. The
+    -- hold below exists to bridge the few seconds between the server's
+    -- remaining-minutes line and the 'Begins!' that follows it -- not to
+    -- survive the player throwing the run away in between, which would seed
+    -- the next run's clock with the old one's number.
+    self.pending_time = nil;
     self.dirty = true;
 end
 
