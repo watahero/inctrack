@@ -5183,7 +5183,76 @@ def test_addon_shell():
 
 
 # --------------------------------------------------------------------------
-# 11. what a line the addon ignores costs, before and after
+# 11. the record: what the source and the docs say about themselves
+# --------------------------------------------------------------------------
+
+REPO = os.path.dirname(HERE)
+
+# English number words, up to as far as anything here counts. Written out
+# rather than digits because that is how the prose in these files reads, and
+# the point of this suite is to check the prose.
+NUMBER_WORDS = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+    "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+    "nineteen": 19, "twenty": 20,
+}
+
+
+def repo_text(*parts):
+    """One repository file, as text."""
+    with open(os.path.join(REPO, *parts), encoding="utf-8") as fh:
+        return fh.read()
+
+
+def test_record(parser):
+    """The claims the source and the docs make about themselves.
+
+    Every check here is of the form "the file says N and the file is M": a
+    counted fact stated in prose, checked against the thing it counts. This
+    suite exists because Phase 4's review found three provably wrong
+    statements in documentation the phase claimed as a deliverable, and one of
+    them had already been "fixed" once -- verified by grepping for the old
+    wording and finding none, a check that cannot tell a right answer from a
+    differently wrong one.
+
+    Nothing here greps for a phrase that must be absent. Every check derives
+    the true number and compares.
+    """
+    res = Result("record: what the source and the docs say about themselves")
+
+    parser_src = repo_text("inctrack", "parser.lua")
+
+    # --- the module header names every function the module exports --------
+    #
+    # parser.relevant is called directly from the shell's chat handler, not
+    # only through parse, so a header that names one entry point sends a
+    # reader looking for the coupling in the wrong place -- which is exactly
+    # where CR-01 lived.
+    exported = sorted(k for k in parser.keys())
+    header = parser_src.split("]]--", 2)[1] if "]]--" in parser_src else ""
+    missing = [name for name in exported
+               if ("parser." + name) not in header]
+    res.check(not missing,
+              "parser.lua's module header does not name %s, which the module "
+              "exports: a reader who trusts the header does not know every "
+              "way into this file" % ", ".join("parser." + n for n in missing))
+
+    stated = re.search(r"No Ashita dependency, no state\. (\w+) functions?:",
+                       parser_src)
+    res.check(stated is not None
+              and NUMBER_WORDS.get(stated.group(1).lower()) == len(exported),
+              "parser.lua's header says it has %r functions and it exports "
+              "%d (%s)"
+              % (stated.group(1) if stated else None,
+                 len(exported), ", ".join(exported)))
+
+    return res
+
+
+# --------------------------------------------------------------------------
+# 12. what a line the addon ignores costs, before and after
 # --------------------------------------------------------------------------
 
 def bench_host(count=False):
@@ -5414,6 +5483,7 @@ def main():
                             lua, parser, State, libs))
     suites.extend(run_suite("ui", test_ui))
     suites.extend(run_suite("addon", test_addon_shell))
+    suites.extend(run_suite("record", test_record, parser))
     # Last, because it is the only suite that reads a stopwatch and every
     # suite before it has finished competing for the machine by the time it
     # runs.

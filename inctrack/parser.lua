@@ -7,9 +7,20 @@
 --[[
 * parser.lua -- CatsEyeXI Incursion chat message parser.
 *
-* Pure Lua. No Ashita dependency, no state. One function:
+* Pure Lua. No Ashita dependency, no state. Two functions:
+*
+*     parser.relevant(line) -> boolean. Could this line possibly be ours?
+*         Allocation-free, runs on the *raw* message, and a deliberate
+*         superset: it may produce false positives but never false negatives.
+*         The shell calls it before strip_colors -- the only place that
+*         allocation is avoidable -- and parse calls it again on entry, so
+*         the module is safe called standalone.
 *
 *     parser.parse(line) -> event table, or nil if the line is not ours.
+*
+* The second entry point matters to a reader more than its size suggests: it
+* is called directly from the shell's chat handler, not only through parse,
+* so a change to it is a change to what the addon can see at all.
 *
 * Two tiers of pattern:
 *
