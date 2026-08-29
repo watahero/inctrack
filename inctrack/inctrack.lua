@@ -496,11 +496,17 @@ ashita.events.register('d3d_present', 'incursion_present', function ()
     * suite asserts all three stacks anyway, so if that ever stops being true
     * the tests say so rather than a guess here quietly papering over it.
     *
-    * One residual, stated rather than guarded: the flags arithmetic reads
-    * opts.locked, so a nil ImGui constant reached only on the locked path
-    * could raise before Begin on a host where an unlocked frame has already
-    * drawn clean, and there this would over-close by one window. Nothing
-    * data-driven reaches it and no test provokes it.
+    * One residual, stated rather than guarded, and it costs two repairs
+    * rather than one: the flags arithmetic reads opts.locked, so a nil ImGui
+    * constant reached only on the locked path could raise before Begin on a
+    * host where an unlocked frame has already drawn clean. That arithmetic
+    * runs before the PushStyleVar as well as before the Begin, so neither has
+    * happened and both repairs below are owed nothing -- the End is an
+    * unmatched close and the PopStyleVar an over-pop. The two are not equally
+    * bad. Each repair call is individually pcall-wrapped, so an over-pop that
+    * raises in Lua is caught here and goes no further; an unmatched ImGui
+    * close is a C++ assert inside the host and no pcall reaches it. Nothing
+    * data-driven reaches this path and no test provokes it.
     *
     * Each repair call is protected on its own, for the same reason as above:
     * neither of them may become the second error of the frame either. The

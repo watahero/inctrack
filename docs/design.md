@@ -519,11 +519,16 @@ is `AshitaCore:GetGuiManager()`, so the read is itself a live call into the GUI
 manager. A raise from it would escape the handler exactly as the failed render
 would have. The closure moves the read inside.
 
-One residual is stated rather than guarded: the flags arithmetic reads
-`opts.locked`, so a nil ImGui constant reached only on the locked path could
-raise before `Begin` on a host where an unlocked frame has already drawn clean,
-and there the repair would over-close by one window. Nothing data-driven reaches
-it and no test provokes it.
+One residual is stated rather than guarded, and it is two repairs wide rather
+than one: the flags arithmetic reads `opts.locked`, so a nil ImGui constant
+reached only on the locked path could raise before `Begin` on a host where an
+unlocked frame has already drawn clean. That arithmetic runs before the
+`PushStyleVar` as well as before the `Begin`, so neither has happened and both
+repairs are owed nothing — the `End` is an unmatched close and the
+`PopStyleVar` an over-pop. They are not equally bad: each repair is
+individually `pcall`-wrapped, so an over-pop that raises in Lua is contained,
+while an unmatched close is a C++ assert inside the host that no `pcall`
+reaches. Nothing data-driven reaches this path and no test provokes it.
 
 ### Cost
 
