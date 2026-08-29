@@ -832,17 +832,33 @@ function __host_switch(over)
 end
 
 --[[
-* string:strip_colors() -- inctrack.lua:167. Ashita's two colour-code escape
-* forms are a marker byte followed by one payload byte. The call counter is
-* free now and is what PERF-01 measures in Phase 4.
+* string:strip_colors() -- the call inctrack.lua makes on a line the gate let
+* through (`line = line:strip_colors()`).
+*
+* Ashita's colour codes are *three* marker bytes -- 0x1E, 0x1F and 0x7F --
+* each followed by one payload byte, and the host strips all three in a
+* single gsub with a character class:
+*
+*     -- addons/libs/sugar/string.lua, string_mt.strip_colors
+*     return (self:gsub('[' .. string.char(0x1E, 0x1F, 0x7F) .. '].', ''));
+*
+* Both the byte set and the gsub count are load-bearing here, and this stub
+* got both wrong until Phase 4's review:
+*
+*   * The set is what parser.relevant's fall-through must be a superset of.
+*     A stub that models a host stripping only two of the three cannot tell
+*     a correct gate from one that drops every 0x7F-coded line.
+*   * The count is an input to the PERF-04 figures. Two gsubs where the host
+*     does one inflates every 'old shape' cost by an allocation per line, and
+*     with it the recorded baseline and the new/old ratio.
+*
+* The call counter is free now and is what PERF-01 measures in Phase 4.
 ]]--
 __host_strip_calls = 0;
 
 function string.strip_colors(s)
     __host_strip_calls = __host_strip_calls + 1;
-    local out = tostring(s):gsub('\\30.', '');
-    out = out:gsub('\\31.', '');
-    return out;
+    return (tostring(s):gsub('[\\30\\31\\127].', ''));
 end
 
 -- require() returns two values from Lua 5.4 on (the module and its loader

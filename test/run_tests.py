@@ -187,8 +187,16 @@ BOON_PHRASE = " gains the effect of "
 #
 # Every line here is asserted to return nil from the shipped parser, so the
 # benchmark can never be won by measuring a path that skipped real work.
+#
+# All three of Ashita's marker bytes are represented, because two of them were
+# not until Phase 4's review: `strip_colors` strips 0x1E, 0x1F *and* 0x7F
+# (addons/libs/sugar/string.lua), and a corpus carrying only the first two
+# models a host that does not strip the third. Every check below that turns on
+# "a code inside a needle" is only as wide as this tuple is.
 CC_A = "\x1e\x51"      # a colour-code marker byte plus its one payload byte
 CC_B = "\x1f\x02"
+CC_C = "\x7f\x31"
+CC_ALL = (CC_A, CC_B, CC_C)
 
 REJECT_PLAIN = (
     "Godwen hits the Nest Skitterer for 42 points of damage.",
@@ -208,8 +216,14 @@ REJECT_PLAIN = (
 # A code at the head and a second one dropped inside the line -- which is
 # exactly where a code defeats an anchored test on raw text, and is the reason
 # the gate declines to judge a coloured line at all.
+#
+# The pair rotates through all three markers, so each one appears both at the
+# head and inside the line across the six. Six lines, two codes apiece, as
+# before: the per-line strip and gsub counts the cost suite asserts on are
+# unchanged by widening the byte set.
 REJECT_COLOURED = tuple(
-    CC_A + line[:5] + CC_B + line[5:] for line in REJECT_PLAIN[:6])
+    CC_ALL[i % 3] + line[:5] + CC_ALL[(i + 1) % 3] + line[5:]
+    for i, line in enumerate(REJECT_PLAIN[:6]))
 
 REJECT_STAMPED = tuple(
     "[21:47:0%d] %s" % (i, line) for i, line in enumerate(REJECT_PLAIN[6:]))
@@ -223,21 +237,34 @@ REJECT_CORPUS = REJECT_PLAIN + REJECT_COLOURED + REJECT_STAMPED
 # well under the five seconds it is allowed to add to a run.
 REJECT_ITERATIONS = 3000
 
-# The head-of-Phase-4 baseline, taken before PERF-01 changed anything: the
-# old shape below, which is the reject path as Phase 3 shipped it.
+# The head-of-Phase-4 baseline: the old shape below, which is the reject path
+# as Phase 3 shipped it.
 #
 # Provenance, never a threshold. A rate is a fact about one machine on one
 # afternoon, so nothing here is ever asserted against it and nothing may
 # compare it with a figure from another machine. The suite's actual checks are
 # the deterministic counters, plus one same-run ratio between two shapes
 # measured side by side on the same corpus.
+#
+# Re-recorded after Phase 4's review. The first figure taken here -- 285,562
+# lines/s, 3.502 us/line -- was measured against a harness whose
+# `strip_colors` stub did two gsubs where Ashita's does one, so the old shape
+# was carrying an allocation per line that the real Phase-3 path never paid.
+# The stub is now the host's single character-class gsub, the old shape is
+# correspondingly cheaper, and the improvement PERF-01 bought is a smaller
+# number than it was reported as. Honest and smaller beats flattering: the
+# figure below is what the old shape actually cost.
+#
+# `commit` names where the old shape was transcribed from and does not move
+# when the figure is re-taken -- the transcription is unchanged; only the host
+# stub it runs against was corrected.
 REJECT_BASELINE = {
     "date": "2026-08-29",
     "commit": "a6a3577",           # the parser exactly as Phase 3 left it
     "backend": "Lua 5.5",          # lupa's default build on this machine
     "python": "3.14.5",
-    "lines_per_second": 285562,
-    "us_per_line": 3.502,
+    "lines_per_second": 288437,
+    "us_per_line": 3.467,
 }
 
 
@@ -3951,21 +3978,31 @@ def test_addon_shell():
     # The safety pin for the whole design: a code inside a needle. Stripped,
     # this is an ordinary 'Begins!' line; raw, the marker sits in the middle
     # of 'Incursion [' and every plain search for it answers no.
-    hidden = begins()
-    split = hidden.index("Incursion ") + 5
-    hidden = hidden[:split] + CC_B + hidden[split:]
-    res.check(all(needle not in hidden
-                  for needle in ("Incursion [", "New Objective: ",
-                                 "Bonus Objective: ", "(Boss: ")),
-              "the fixture does not actually hide the needle, so the check "
-              "below would pass with the colour fall-through removed: %r"
-              % hidden)
-    coded = loaded_host()
-    coded.fire_text_in(hidden)
-    res.check(shell_run(coded) is not None,
-              "a colour code landing inside one of the gate's needles lost "
-              "the line that starts a run -- silently, with the window simply "
-              "never appearing")
+    #
+    # Once per marker byte, and that is the point rather than thoroughness for
+    # its own sake. This pin ran on 0x1F alone for the whole of Phase 4 while
+    # the gate read only 0x1E and 0x1F -- so it could not see that 0x7F, which
+    # `strip_colors` also removes, was missing from the gate. A pin that
+    # exercises a subset of the host's markers proves the gate is a superset
+    # of that subset and nothing more. The corpus cannot help: Ashita's log
+    # writer strips codes on the way to disk, so all 2.9M recorded lines carry
+    # none of the three.
+    for marker, label in ((CC_A, "0x1E"), (CC_B, "0x1F"), (CC_C, "0x7F")):
+        hidden = begins()
+        split = hidden.index("Incursion ") + 5
+        hidden = hidden[:split] + marker + hidden[split:]
+        res.check(all(needle not in hidden
+                      for needle in ("Incursion [", "New Objective: ",
+                                     "Bonus Objective: ", "(Boss: ")),
+                  "the %s fixture does not actually hide the needle, so the "
+                  "check below would pass with the colour fall-through "
+                  "removed: %r" % (label, hidden))
+        coded = loaded_host()
+        coded.fire_text_in(hidden)
+        res.check(shell_run(coded) is not None,
+                  "a %s colour code landing inside one of the gate's needles "
+                  "lost the line that starts a run -- silently, with the "
+                  "window simply never appearing" % label)
 
     # --- the timestamp loop only runs for a line that carries a stamp -----
     #
@@ -5142,8 +5179,8 @@ def test_reject_cost(parser, backend):
 
     res.check(new_strip == 0,
               "a colour-free line the addon ignores still paid for %.2f "
-              "colour strips apiece -- two gsubs and two allocations, on the "
-              "game thread, on every line the client receives"
+              "colour strips apiece -- a gsub and an allocation, on the game "
+              "thread, on every line the client receives"
               % (new_strip / free_n))
     res.check(new_gsub == 0,
               "a colour-free line the addon ignores still ran %.2f gsubs "
