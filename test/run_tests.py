@@ -4783,6 +4783,115 @@ def test_addon_shell():
               "this one, so a player who has heard about a disk fault once "
               "has no way to hear about it again")
 
+    # --- an encode the host refuses (D-01) --------------------------------
+    #
+    # persist() -- inctrack.lua (`local function persist`) -- has two halves,
+    # and only one of them was ever a failure the addon reacted to. The
+    # encode has been protected since 1.0.0; what it did with a failure was
+    # store the empty string and then write it:
+    #
+    #     incursion.settings.session = (ok and blob ~= nil) and encoded or '';
+    #     settings.save();
+    #
+    # so a raise out of the host's encoder destroyed the last good save of a
+    # run in progress and said nothing -- the one failure path in the file
+    # that was both silent and destructive, while its neighbours latch,
+    # retry and report. A mid-run reload afterwards comes back blank, which
+    # is precisely the outcome persistence exists to prevent, and /incursion
+    # reset -- what a player reaches for -- makes no difference.
+    #
+    # Nothing here could be provoked before: the stub's encoder could not be
+    # made to fail on demand, so the destructive branch had never run.
+    encoding = loaded_host()
+    encoding.fire_text_in(begins())
+    encoding.fire_text_in(SHELL_MOBS)
+    encoding.fire("d3d_present")
+    good = encoding.settings["session"]
+    res.check(good != "" and bool(encoding.sessions)
+              and encoding.sessions[-1] == good,
+              "the fixture never got a good run onto disk, so nothing below "
+              "is measuring what an encode failure does to one: %r"
+              % (encoding.sessions[-1:],))
+
+    encoding.fail_encodes()
+    encoding.fire_text_in(SHELL_BOON)
+    res.check(encoding.addon["incursion"]["save_due"] is True,
+              "the fixture owes no write, so the frame below takes the flush "
+              "branch not at all and proves nothing")
+    encodes_before = encoding.encode_attempts
+    attempts_before = encoding.save_attempts
+    chat_before = len(encoding.chat)
+
+    escaped = frame_escape(encoding)
+    res.check(escaped is None,
+              "a refused encode threw out of d3d_present and into the game "
+              "thread every addon shares: %s" % escaped)
+    res.check(encoding.encode_attempts > encodes_before,
+              "the frame never tried to encode the run at all, so every "
+              "check below passed for the wrong reason")
+    res.check(encoding.settings["session"] == good,
+              "a run the host refused to encode was stored as %r over the "
+              "good save that was already there, so a mid-run reload now "
+              "comes back blank" % (encoding.settings["session"],))
+    res.check(encoding.save_attempts == attempts_before,
+              "the addon could not encode the run and called settings.save() "
+              "anyway (%d attempts), so whatever it decided to hold instead "
+              "is now what is on disk"
+              % (encoding.save_attempts - attempts_before))
+    res.check(bool(encoding.sessions) and encoding.sessions[-1] == good,
+              "the last thing to reach disk is no longer the run the player "
+              "is standing in: %r" % (encoding.sessions[-1:],))
+
+    said = encoding.chat[chat_before:]
+    res.check(len(said) == 1,
+              "an encode the host refused produced %d chat lines. It is the "
+              "one failure path in this addon that said nothing at all, and "
+              "every other one says its piece exactly once" % len(said))
+    res.check(any("100%" in line for line in said),
+              "the host's error text lost its percent sign on the way to "
+              "chat, which means it was pasted into the format string "
+              "instead of passed as an argument: %r" % (said,))
+    res.check(encoding.addon["incursion"]["save_due"] is True,
+              "a refused encode was dropped with the flag already consumed, "
+              "so nothing retries it and the run stays unwritten until some "
+              "later chat event happens to owe another write")
+
+    # Deferred, not lost. A run stops holding whatever the encoder refused --
+    # a phase ends, the value is replaced -- and the next frame past the
+    # retry window writes down everything since, boon included.
+    encoding.heal_encodes()
+    encoding.tick(6.0)
+    encoding.fire("d3d_present")
+    res.check(encoding.settings["session"] not in ("", good),
+              "the run was never written down once the encoder came back, so "
+              "everything since the fault is gone: %r"
+              % (encoding.settings["session"],))
+    healed = (encoding.json.decode(encoding.settings["session"])
+              if encoding.settings["session"] else None)
+    res.check(healed is not None and healed["boons"][1] is not None,
+              "the boon picked while the encoder was refusing never reached "
+              "disk, and that is the event the server never announces again: "
+              "%r" % (encoding.settings["session"],))
+
+    # The one case where blanking the session is the right answer, kept
+    # honest in the other direction: there is no run. That is the only thing
+    # an empty session may mean, and a frame that flushes with nothing to
+    # serialise has to say it, or a cleared run comes back from the dead.
+    blanking = loaded_host()
+    blanking.fire_text_in(begins())
+    blanking.fire("d3d_present")
+    res.check(blanking.settings["session"] != "",
+              "the fixture has nothing on disk to clear, so the check below "
+              "would pass on an empty string that was always empty")
+    blank_state = shell_state(blanking)
+    blank_state.reset(blank_state)
+    blanking.addon["incursion"]["save_due"] = True
+    blanking.fire("d3d_present")
+    res.check(blanking.settings["session"] == "",
+              "a frame that flushed with no run to serialise left the "
+              "previous run's blob on disk, so it comes back after the run "
+              "it belonged to is over: %r" % (blanking.settings["session"],))
+
     # --- an unload straight after a burst loses nothing -------------------
     #
     # The unload path is the one that cannot wait for a frame, and its

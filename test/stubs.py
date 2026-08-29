@@ -983,6 +983,27 @@ JSON_CHUNK = """
 
 local json = {};
 
+--[[
+* An armed json.encode() fault.
+*
+* Ashita's json ships without source and its failure modes are not
+* enumerable from this repo, while what it is handed is server-authored text
+* that has been through strip_colors and the parser and is otherwise
+* unconstrained. This stub's own encoder already raises on two things -- a
+* non-finite number, and nesting past 64 -- so the raise is reachable in
+* principle; what was missing was a way to point it at the addon on demand,
+* the way the settings.save() fault does for the disk.
+*
+* Deliberately the same shape as that one: __host_encode_fault is the message
+* the call raises with, __host_encode_fault_left is how many further calls
+* raise (-1 for every call from now on, which is the shape a run carrying an
+* unencodable value really has), and the attempt is counted before the raise
+* so a test can tell 'never encoded' from 'encoded and failed'.
+]]--
+__host_encode_fault      = nil;
+__host_encode_fault_left = 0;
+__host_encode_attempts   = 0;
+
 local ESCAPES = {
     ['"']  = '\\\\"',
     ['\\\\'] = '\\\\\\\\',
@@ -1069,6 +1090,16 @@ encode_value = function (v, depth)
 end
 
 function json.encode(v)
+    __host_encode_attempts = __host_encode_attempts + 1;
+    if __host_encode_fault ~= nil and __host_encode_fault_left ~= 0 then
+        if __host_encode_fault_left > 0 then
+            __host_encode_fault_left = __host_encode_fault_left - 1;
+        end
+        -- Level 0, for the same reason the save fault uses it: the message
+        -- reaches the addon exactly as written, so a test can assert on what
+        -- the player is actually shown.
+        error(__host_encode_fault, 0);
+    end
     return encode_value(v, 0);
 end
 
@@ -1410,6 +1441,37 @@ class AshitaHost:
         g = self.lua.globals()
         g["__host_save_fault"] = None
         g["__host_save_fault_left"] = 0
+
+    @property
+    def encode_attempts(self):
+        """Every json.encode() call, returned or raised.
+
+        The counterpart of `save_attempts`, and it answers the question that
+        separates the two halves of persist(): whether the addon got as far
+        as encoding the run at all before it decided what to write down.
+        """
+        return int(self._g("__host_encode_attempts"))
+
+    def fail_encodes(self, message="json.encode: cannot encode nan (100% "
+                                   "of nothing)", times=-1):
+        """Make json.encode() raise instead of returning a string.
+
+        times=-1 (the default) is the persistent shape: a run holding a value
+        the encoder refuses does not stop holding it because a frame went by.
+
+        The default message carries a percent sign for the same reason the
+        save fault's does -- error text must reach the player as an argument
+        and never as part of a format string.
+        """
+        g = self.lua.globals()
+        g["__host_encode_fault"] = message
+        g["__host_encode_fault_left"] = times
+
+    def heal_encodes(self):
+        """Disarm the json.encode() fault; later calls encode again."""
+        g = self.lua.globals()
+        g["__host_encode_fault"] = None
+        g["__host_encode_fault_left"] = 0
 
     @property
     def strip_colors_calls(self):
