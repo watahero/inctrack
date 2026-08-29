@@ -18,17 +18,24 @@ The persistence suite round-trips the save format through Ashita's own
 json.lua. It is found next to the chatlogs (<Ashita>\\addons\\libs) or via
 INCURSION_ASHITA_LIBS; without it that suite is skipped.
 
-Suites:
+Eleven suite functions, printing thirteen result lines: test_parser returns
+three Results (coverage, the dormant generic tier, the over-reach guard) and
+every other suite returns one. Both numbers are checked by the record suite
+against this file and against docs/design.md, because the arithmetic here has
+been stated wrongly more than once.
+
   1. parser coverage    -- every structural Incursion line must parse      [logs]
-  2. generic tier       -- the catch-alls must match nothing that exists   [logs]
-  3. run reconstruction -- instance, phase, points, completion per run     [logs]
-  4. state unit tests   -- objectives, bonus, recovery
-  5. adaptability       -- invented future content is still tracked
-  6. disconnect         -- stale progress is never presented as current
-  7. timers             -- countdown, linger, staleness
-  8. persistence        -- json round trip                                  [libs]
-  9. ui                 -- pure helpers, and whole-window render snapshots
- 10. addon shell        -- registration, text_in, settings, commands
+     generic tier       -- the catch-alls must match nothing that exists   [logs]
+     tightened patterns -- each split re-derived from the raw text         [logs]
+  2. run reconstruction -- instance, phase, points, completion per run     [logs]
+  3. state unit tests   -- objectives, bonus, recovery
+  4. adaptability       -- invented future content is still tracked
+  5. disconnect         -- stale progress is never presented as current
+  6. timers             -- countdown, linger, staleness
+  7. persistence        -- json round trip                                  [libs]
+  8. ui                 -- pure helpers, and whole-window render snapshots
+  9. addon shell        -- registration, text_in, settings, commands
+ 10. record             -- the counted claims the source and docs make
  11. reject cost        -- what a line the addon ignores costs, before/after
 
 ui.lua and inctrack.lua are reached through stubbed hosts (test/stubs.py);
@@ -5338,6 +5345,55 @@ def test_record(parser):
               "lists %d entries"
               % (None if stated is None else stated.groups(), listed))
 
+    # --- how many suites there are, and how many lines they print ---------
+    #
+    # docs/design.md said "Eleven suites, reported as twelve result lines"
+    # over a twelve-row table, against a harness that calls run_suite() ten
+    # times -- a sentence that contradicted the table under it and matched
+    # neither number. It had already been corrected once, verified by
+    # grepping for the previous wrong wording and finding none.
+    #
+    # So: counted, from the harness and from the table, and compared with
+    # both numbers in the sentence. This file is read as text rather than
+    # introspected, because what is being checked is a claim about the source.
+    harness = repo_text("test", "run_tests.py")
+    functions = len(re.findall(r"run_suite\(\"", harness))
+    # The parser suite is the only one that returns more than one Result.
+    parser_lines = len(
+        re.search(r"return coverage[^\n]*", harness).group(0).split(","))
+    said = re.search(
+        r"(\w+) suite functions, reported as (\w+) result lines", design)
+    counts = (None if said is None else
+              tuple(NUMBER_WORDS.get(g.lower()) for g in said.groups()))
+
+    # Rows of the table immediately under that sentence, not of every table
+    # in the file: from its header rule to the first line that is not a row.
+    rows, in_table = 0, False
+    for line in (design[said.end():] if said else "").splitlines():
+        if line.startswith("|---"):
+            in_table = True
+        elif in_table:
+            if not line.startswith("|"):
+                break
+            rows += 1
+
+    res.check(functions > 0 and parser_lines > 1,
+              "the harness no longer looks like run_suite(\"name\", fn) with "
+              "one multi-Result suite (%d calls, parser returns %d), so the "
+              "counts below would be checking nothing"
+              % (functions, parser_lines))
+    res.check(counts == (functions, functions - 1 + parser_lines),
+              "docs/design.md says %r; the harness calls run_suite() %d "
+              "times and the parser suite returns %d Results, which is %d "
+              "result lines"
+              % (None if said is None else said.groups(), functions,
+                 parser_lines, functions - 1 + parser_lines))
+    res.check(rows == functions - 1 + parser_lines,
+              "docs/design.md's table has %d rows and the harness prints %d "
+              "result lines, so the sentence above it can be right and the "
+              "table still wrong"
+              % (rows, functions - 1 + parser_lines))
+
     return res
 
 
@@ -5522,7 +5578,9 @@ def run_suite(label, fn, *args):
     a named defect stopped being counted. The traceback goes to stderr so
     nothing is lost.
 
-    Returns a list, because the parser suites come in pairs.
+    Returns a list, because test_parser returns three Results rather than one
+    -- coverage, the dormant generic tier and the over-reach guard. Every
+    other suite returns a single Result and is wrapped here.
     """
     try:
         out = fn(*args)

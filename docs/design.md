@@ -619,9 +619,11 @@ at all and `ui.lua` exports only `render` and `forget`, so their file-scope stat
 is reached by upvalue reflection rather than by adding an export to the shipped
 code for the tests' benefit.
 
-Eleven suites, reported as twelve result lines — the parser suite emits three:
+Eleven suite functions, reported as thirteen result lines — the parser suite
+emits three of them (coverage, the dormant generic tier, and the over-reach
+guard), and every other suite emits one:
 
-| Suite | Needs |
+| Result line | Needs |
 |---|---|
 | parser coverage — every structural Incursion line parses | chatlogs |
 | generic tier — the catch-alls match nothing that exists today | chatlogs |
@@ -634,6 +636,7 @@ Eleven suites, reported as twelve result lines — the parser suite emits three:
 | persistence — the save format through Ashita's own `json.lua` | Ashita's `json.lua` |
 | ui — the pure helpers, and whole-window render snapshots | nothing |
 | addon shell — registration, chat, settings, commands, the write policy | nothing |
+| record — the counted claims the source and these docs make about themselves | nothing |
 | reject cost — what a line the addon ignores costs, before and after | nothing |
 
 The split matters: the deepest suites replay the author's own chatlogs, which are
