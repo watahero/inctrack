@@ -50,7 +50,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: The Net** - Bring `ui.lua` and `inctrack.lua` under test behind stubs, and turn each confirmed defect into a named failing test
 - [x] **Phase 2: The Three Defects** - Kill the double-counted phase, the un-aged restore and the dead close path, flipping Phase 1's red tests green
 - [x] **Phase 3: Fragile Paths** - Make the render path un-crashable and stop the parser and restore path from admitting things the server never said
-- [ ] **Phase 4: Cost and Record** - Reject an irrelevant chat line before paying for it, get settings writes off the chat thread, and make the docs describe the addon that ships
+- [x] **Phase 4: Cost and Record** - Reject an irrelevant chat line before paying for it, get settings writes off the chat thread, and make the docs describe the addon that ships
 
 ## Phase Details
 
@@ -155,7 +155,7 @@ Plans:
   4. `shorten()`'s memo cache stops growing at a stated bound when fed a stream of distinct server stat strings, and holds nothing from a previous run after a reset or character switch.
   5. `docs/design.md` states what the code does: `AlwaysAutoResize` plus a fixed-width spacer, `NoTitleBar`, the actual stats layout (points tracked, not displayed), the boons row, and the `elapsed_final` / `desynced` / `recovered` / `points_partial` / `bonus.loc` run-record fields. `CHANGELOG.md` has a 1.2.0 entry naming what changed, and `addon.version` in `inctrack/inctrack.lua` reads `'1.2.0'`.
 
-**Plans**: 2/3 plans executed
+**Plans**: 3/3 plans executed
 
 Plans:
 
@@ -171,7 +171,7 @@ Plans:
   hoisted, and `shorten()`'s memo cache bounded and cleared on reset or
   character switch
 
-- [ ] 04-03-PLAN.md — DOC-01/02: `addon.version` at `'1.2.0'` with a changelog
+- [x] 04-03-PLAN.md — DOC-01/02: `addon.version` at `'1.2.0'` with a changelog
   entry in user-facing terms and a harness pin so the two cannot drift,
   `docs/design.md` rewritten against the source rather than the two superseded
   summaries, the `ui.lua` layout comment naming every row, the README
@@ -227,7 +227,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. The Net | 3/3 | ✓ Complete | 2026-08-29 |
 | 2. The Three Defects | 2/2 | ✓ Implemented (in-game checks deferred) | 2026-08-29 |
 | 3. Fragile Paths | 3/3 | ✓ Complete | 2026-08-29 |
-| 4. Cost and Record | 2/3 | In Progress|  |
+| 4. Cost and Record | 3/3 | ✓ Complete | 2026-08-29 |
 
 ---
 *Roadmap created: 2026-08-29*

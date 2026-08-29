@@ -54,8 +54,8 @@ The `text_in` handler runs on every chat line the client receives, forever.
 
 ### Documentation
 
-- [ ] **DOC-01**: `docs/design.md` matches shipped behaviour — window sizing, `NoTitleBar`, the stats layout, the boons row, and the run-record fields (`elapsed_final`, `desynced`, `recovered`, `points_partial`, `bonus.loc`)
-- [ ] **DOC-02**: `CHANGELOG.md` and the addon's version string record 1.2.0 and what changed
+- [x] **DOC-01**: `docs/design.md` matches shipped behaviour — window sizing, `NoTitleBar`, the stats layout, the boons row, and the run-record fields (`elapsed_final`, `desynced`, `recovered`, `points_partial`, `bonus.loc`)
+- [x] **DOC-02**: `CHANGELOG.md` and the addon's version string record 1.2.0 and what changed
 
 ## v2 Requirements
 
@@ -101,8 +101,8 @@ Populated during roadmap creation (2026-08-29). See `.planning/ROADMAP.md` for p
 | PERF-02 | Phase 4 | Complete |
 | PERF-03 | Phase 4 | Complete |
 | PERF-04 | Phase 4 | Complete |
-| DOC-01 | Phase 4 | Pending |
-| DOC-02 | Phase 4 | Pending |
+| DOC-01 | Phase 4 | Complete |
+| DOC-02 | Phase 4 | Complete |
 
 **Coverage:**
 

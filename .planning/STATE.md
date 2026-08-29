@@ -5,16 +5,16 @@ milestone_name: correctness and cost
 current_phase: 4
 current_phase_name: Cost and Record
 status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-08-29T08:53:31.660Z"
+stopped_at: Completed 04-03-PLAN.md -- Phase 4 and milestone v1.2.0 complete
+last_updated: "2026-08-29T09:13:52.656Z"
 last_activity: 2026-08-29
-last_activity_desc: "04-01 complete: parser.relevant gates the hot path before any allocation (needle derivation re-derived and checked over 2.95M lines, zero parsed lines gated out); reject path 3.5-5x with zero allocations; parse-error line got a report-once latch; three negative controls recorded"
-state_head: 59c4e68067dc9b44f01e5e46d3df629b616910ce
+last_activity_desc: "04-03 complete (DOC-01, DOC-02): ships as 1.2.0 with a CHANGELOG entry in the terms the Phase-1 expected failures used and a harness pin holding the two together (negative control both ways); docs/design.md rewritten from the source over all 25 ledger rows, with new sections on persistence and schema version 2, the restore validator, render containment, cost and what the player is told, and neither superseded claim reaching it; ui.lua's layout comment names all nine rows; README corpus figures re-derived (127 logs, 130 days, 2,951,129 lines, 111 runs). addon 189 -> 190, every other suite flat, parser exactly 11819 and generic exactly 1, zero known defects on both backends. Redeployed: 3 pre-copy DRIFTED + state.lua same (unchanged since Phase 3), then same x4 and the install reporting 1.2.0. Phase 4 and milestone v1.2.0 complete"
+state_head: af2c6f17f9f929dbc986d71e6af9195c1d239279
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 11
-  completed_plans: 10
+  completed_plans: 11
   percent: 25
 ---
 
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 ## Current Position
 
 Phase: 4 of 4 (Cost and Record)
-Plan: 2 of 3 in current phase
-Status: 04-01 complete (PERF-01, PERF-04) — 04-02 (PERF-02, PERF-03) is next
-Last activity: 2026-08-29 — 04-01 complete: PERF-01's cheap gate lands before strip_colors (seven plain needles, each a literal every matcher requires under every alternation and optional group, re-derived from parser.lua and checked over 2,951,129 log lines with zero parsed lines gated out); a colour-code marker byte makes the gate decline to judge, so a false negative is impossible; PERF-04's benchmark prints the head-of-phase baseline (285,562 lines/s, 3.502 us/line) beside the shipped figure every run; adaptability 42 → 119, addon 143 → 160, parser still exactly 11819 and generic exactly 1; three negative controls recorded
+Plan: 3 of 3 in current phase
+Status: Phase 4 complete — 04-01 (PERF-01/04), 04-02 (PERF-02/03) and 04-03 (DOC-01/02) all done. Milestone v1.2.0 is closed; /gsd-audit-milestone is next
+Last activity: 2026-08-29 — 04-03 complete (DOC-01, DOC-02): ships as 1.2.0 with a CHANGELOG entry in the terms the Phase-1 expected failures used and a harness pin holding the two together (negative control both ways); docs/design.md rewritten from the source over all 25 ledger rows, with new sections on persistence and schema version 2, the restore validator, render containment, cost and what the player is told, and neither superseded claim reaching it; ui.lua's layout comment names all nine rows; README corpus figures re-derived (127 logs, 130 days, 2,951,129 lines, 111 runs). addon 189 -> 190, every other suite flat, parser exactly 11819 and generic exactly 1, zero known defects on both backends. Redeployed: 3 pre-copy DRIFTED + state.lua same (unchanged since Phase 3), then same x4 and the install reporting 1.2.0. Phase 4 and milestone v1.2.0 complete
 
-Progress: [███░░░░░░░] 25% of phase 4 (1 of 3 plans)
+Progress: [██████████] 100% of phase 4 (3 of 3 plans)
 
 ## Performance Metrics
 
@@ -70,6 +70,7 @@ Progress: [███░░░░░░░] 25% of phase 4 (1 of 3 plans)
 | Phase 03 P03 | 16min | 3 tasks | 2 files |
 | Phase 04 P01 | 40min | 3 tasks | 4 files |
 | Phase 04 P02 | 15min | 3 tasks | 3 files |
+| Phase 04 P03 | 25min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -125,6 +126,12 @@ Recent decisions affecting current work:
 - [Phase 4]: The unload handler stays unconditional and does not consult the dirty flag -- that is what makes deferring every other write safe
 - [Phase 4]: PERF-03: the boon memo cache caps at 64 and drops whole, emptied in place so upvalue reflection keeps measuring the live table
 - [Phase 4]: A negative control that will not go red is a finding about the check: the plan's conditional-unload control could not discriminate, so a throttled-kill-count check was added
+- [Phase 4]: [Phase 4]: 04-03: ships as 1.2.0 -- no new features so not 1.3.0, three defects plus six hardenings plus four cost changes so not a patch
+- [Phase 4]: [Phase 4]: 04-03: the harness pins addon.version to the newest CHANGELOG.md heading, reading both sides out of their real sources, and notes-and-skips on an absent file as the persistence suite does for json.lua
+- [Phase 4]: [Phase 4]: 04-03: docs/design.md was written from the source files, never from 03-02/03-03-SUMMARY.md -- the boon glyph group may be empty and full_string does not exist, and neither reversed claim reached the document
+- [Phase 4]: [Phase 4]: 04-03: four line citations in the plan's drift ledger no longer pointed at what they named, and its D13 suite arithmetic was off; the source won in every case and the corrections are recorded in the SUMMARY
+- [Phase 4]: [Phase 4]: 04-03: the README never documented a close button -- the inherited claim is false and was recorded as a context correction rather than acted on
+- [Phase 4]: [Phase 4]: 04-03: state.lua was not changed by Phase 4, so one pre-copy 'same:' verdict is correct; the copy-target-wrong signal is four of them, and three DRIFTED plus the 1.1.0 string read out of the target prove the target is right
 
 ### Pending Todos
 
@@ -148,8 +155,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-08-29T08:53:20.208Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-08-29T09:13:34.889Z
+Stopped at: Completed 04-03-PLAN.md -- Phase 4 and milestone v1.2.0 complete
 Resume file: None
 
 ## Deferred Verification
