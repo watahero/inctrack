@@ -36,7 +36,7 @@ Faults visible in the code as written, independent of what the server sends.
 
 Paths that are fragile but have not yet been observed to fail.
 
-- [ ] **HARD-01**: an error raised inside `ui.render` cannot leave the ImGui stack unbalanced, and cannot repeat once per frame unchecked — it runs inside `d3d_present`
+- [x] **HARD-01**: an error raised inside `ui.render` cannot leave the ImGui stack unbalanced, and cannot repeat once per frame unchecked — it runs inside `d3d_present`
 - [ ] **HARD-02**: a boss objective naming a mob whose own name contains " at " is parsed correctly rather than split at the first occurrence
 - [ ] **HARD-03**: a mob list containing a name with a comma in it is not split into two mobs
 - [ ] **HARD-04**: the boon matcher cannot claim an ordinary buff line — it matches only the `(<glyph>): <stats>` form
@@ -91,7 +91,7 @@ Populated during roadmap creation (2026-08-29). See `.planning/ROADMAP.md` for p
 | FIX-01 | Phase 2 | Complete |
 | FIX-02 | Phase 2 | Complete |
 | FIX-03 | Phase 2 | Complete |
-| HARD-01 | Phase 3 | Pending |
+| HARD-01 | Phase 3 | Complete |
 | HARD-02 | Phase 3 | Pending |
 | HARD-03 | Phase 3 | Pending |
 | HARD-04 | Phase 3 | Pending |

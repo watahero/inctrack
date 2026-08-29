@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.2.0
 milestone_name: correctness and cost
-current_phase: 2
-current_phase_name: The Three Defects
+current_phase: 3
+current_phase_name: Fragile Paths
 status: executing
-stopped_at: Completed 02-02-PLAN.md -- Phase 2 complete, zero known defects
-last_updated: "2026-08-28T23:38:50.656Z"
+stopped_at: Completed 03-01-PLAN.md -- HARD-01 closed, 13,037 checks over 127 logs, zero known defects
+last_updated: "2026-08-29T05:03:41.420Z"
 last_activity: 2026-08-29
 last_activity_desc: "02-01 complete: FIX-01 and FIX-02 fixed in state.lua; one xfail (FIX-03) remains"
-state_head: 459f3ef7fd91e9c61d81810cd370a43c9060fba9
+state_head: 6508d0b47a7830dc337ba20f2074e56755ca7b4f
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 5
-  completed_plans: 5
+  total_plans: 8
+  completed_plans: 6
   percent: 25
 ---
 
@@ -25,16 +25,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-28)
 
 **Core value:** What the window shows is either true, or visibly marked as unconfirmed — never quietly wrong.
-**Current focus:** Phase 2 — The Three Defects
+**Current focus:** Phase 3 — Fragile Paths
 
 ## Current Position
 
-Phase: 2 of 4 (The Three Defects)
-Plan: 2 of 2 in current phase
-Status: 02-01 complete — 02-02 (FIX-03) is next
-Last activity: 2026-08-29 — 02-01 complete: FIX-01 and FIX-02 fixed in state.lua, both xfails converted to passing checks with their Phase-1 assertion bytes audited intact
+Phase: 3 of 4 (Fragile Paths)
+Plan: 1 of 3 in current phase
+Status: 03-01 complete (HARD-01) — 03-02 (HARD-02/03/04) is next
+Last activity: 2026-08-29 — 03-01 complete: ui.render is contained in d3d_present with a conditional stack repair, a report-once latch and two recovery paths; addon suite 83 → 112 checks, both negative controls demonstrated
 
-Progress: [███░░░░░░░] 25% of phase 2 (1 of 2 plans)
+Progress: [███░░░░░░░] 33% of phase 3 (1 of 3 plans)
 
 ## Performance Metrics
 
@@ -65,6 +65,7 @@ Progress: [███░░░░░░░] 25% of phase 2 (1 of 2 plans)
 | Phase 01 P03 | 16min | 3 tasks | 1 files |
 | Phase 02 P01 | 16min | 3 tasks | 2 files |
 | Phase 02 P02 | 22min | 3 tasks | 3 files |
+| Phase 03 P01 | 29min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -95,6 +96,11 @@ Recent decisions affecting current work:
 - [Phase 2]: ui.render keeps returning opts.visible unconditionally; two untouchable Phase-1 assertions read that return value
 - [Phase 2]: A disjunctive red line is retired with a companion check pinning which branch the fix took, so the other branch cannot satisfy it later
 - [Phase 2]: The recorder's close switch stays although it can no longer fire: it is the subject of the FIX-03 regression check, not dead weight
+- [Phase 3]: 03-01: the pcall goes in inctrack.lua's frame handler; ui.lua is not edited at all -- the host boundary lives beside the text_in pcall
+- [Phase 3]: 03-01: the ImGui stack repair is conditional on render_ok (the render shape having run end to end on this host once) -- three statements run before Begin, so an unconditional End is an unmatched close and on a real host the second error of the frame
+- [Phase 3]: 03-01: the style colour stack is deliberately not repaired (its only push/pop bracket one ImGui call with no raise site between); the suite asserts all three stacks anyway so a future change goes red rather than being papered over
+- [Phase 3]: 03-01: the bare /incursion while render_off is a re-enable and a return to automatic visibility, not a toggle -- toggling against a window that is not drawn reads as 'hide it'
+- [Phase 3]: 03-01: the recorder's fault injector models the consequence of a raising ImGui binding on demand and never asserts the cause; off by default, disarmed by reset(), and stack-moving entry points raise before they are logged
 
 ### Pending Todos
 
@@ -118,8 +124,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-08-28T23:38:40.651Z
-Stopped at: Completed 02-02-PLAN.md -- Phase 2 complete, zero known defects
+Last session: 2026-08-29T05:03:41.221Z
+Stopped at: Completed 03-01-PLAN.md -- HARD-01 closed, 13,037 checks over 127 logs, zero known defects
 Resume file: None
 
 ## Deferred Verification
@@ -136,6 +142,7 @@ to Phases 3-4 rather than pause; neither blocks that work.
   wait for the server's next `You have N minutes remaining` line. PASS if they
   agree within a minute. FAIL if the clock came back unchanged, or jumps down by
   roughly the downtime when the server's line arrives.
+
 - **CR-01 - the window frame.** Same session: no title bar and no close control;
   not resizable by dragging an edge; height still auto-fits as content changes;
   `/incursion lock` still prevents dragging; `/incursion` still toggles. FAIL on
@@ -145,4 +152,3 @@ to Phases 3-4 rather than pause; neither blocks that work.
   This one exists because CR-01's fix rests on Ashita's SDK header and a survey of
   220 `imgui.Begin(` call sites, not on an observed frame. The compiled binding's
   type handling cannot be inspected, so only a rendered window proves the flags land.
-
