@@ -178,6 +178,17 @@ coverage:
 status: complete
 ---
 
+> **SUPERSEDED BY THE PHASE-3 CODE REVIEW (finding WR-04).** This summary was
+> written before review. The shipped boon tail is `%([^)]*%)` — the glyph group
+> may be **empty**. The non-empty rule was removed because it narrowed only
+> against the server: the tail plus a non-blank name already discriminates
+> ordinary buffs, and with no fallback tier a `(): ` glyph group would have
+> silently and permanently dropped a boon. The `)`-exclusion was kept. The
+> adaptability check named below now asserts the opposite of what its name
+> suggests. See `03-REVIEW.md`.
+
+
+
 # Phase 3 Plan 02: The Parser Tightenings (HARD-02/03/04) Summary
 
 Three parser patterns narrowed so the window cannot show something the server

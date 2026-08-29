@@ -147,6 +147,7 @@ to Phases 3-4 rather than pause; neither blocks that work.
 | Phase | State | Resume |
 |-------|-------|--------|
 | 2 | verification_deferred_human | /gsd-verify-work 2 |
+| 3 | verification_deferred_human (1 prudence item) | /gsd-verify-work 3 |
 
 - **Criterion 4 - the reload clock.** In an Incursion: note the window's clock,
   `/addon reload inctrack`, stay unloaded ~2 min, reload and read the clock, then
@@ -163,3 +164,9 @@ to Phases 3-4 rather than pause; neither blocks that work.
   This one exists because CR-01's fix rests on Ashita's SDK header and a survey of
   220 `imgui.Begin(` call sites, not on an observed frame. The compiled binding's
   type handling cannot be inspected, so only a rendered window proves the flags land.
+
+- **Phase 3 item D8 (prudence, not a defect).** The repair does
+  `pcall(function () imgui.End(); end)`, which reaches Ashita's GuiManager
+  through a metatable `__index`. The stub models that shape but cannot execute
+  it. Criterion 1 is written against the stub, so this is beyond the contract —
+  it would be closed by the same in-game session as the Phase 2 items.

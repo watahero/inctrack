@@ -235,6 +235,19 @@ completed: 2026-08-29
 status: complete
 ---
 
+> **SUPERSEDED BY THE PHASE-3 CODE REVIEW (finding CR-01).** This summary was
+> written before review. `full_string` **no longer exists** in
+> `inctrack/state.lua` — every string field is checked with `is_string`. The
+> non-empty requirement was a regression: the addon's own parser can emit a
+> blank `next_boss.name` from a line like `(Boss:  at (J-9))`, so the validator
+> was rejecting sessions the addon itself had written, and one such line turned
+> every later reload into total loss of the run's boons, points, phase and
+> elapsed. The rule is now: **the validator answers "what shape is this", never
+> "is this informative."** Read every "non-empty string" below as "string". See
+> `03-REVIEW.md`.
+
+
+
 # Phase 3 Plan 03: Structural Restore Validation and the Held Timer Sync Summary
 
 **A saved session of the wrong shape is now refused whole before a single field is read for its value — 27 one-field-broken rejection cases, each proving falsy return, no run left behind and nothing raised — with the objective and boss preview rebuilt from validated values instead of adopted by reference, the boon loop no longer skipping malformed members, and `reset()` clearing the held timer sync so a `/incursion reset` cannot seed the next run's clock.**
