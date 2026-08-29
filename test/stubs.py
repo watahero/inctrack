@@ -794,6 +794,26 @@ __host_saves       = 0;
 __host_sessions    = {};
 __host_settings_cb = nil;
 
+--[[
+* An armed settings.save() fault.
+*
+* Ashita's save() is a synchronous disk write, and it can fail for reasons
+* that have nothing to do with the addon: a read-only settings file, a full
+* disk, a file another process has open. Nothing in this harness could
+* provoke that until Phase 4's review found persist() running unprotected at
+* the top of d3d_present -- so the failure was unpinned as well as
+* uncontained, and a stub whose save cannot fail is what let it be both.
+*
+* __host_save_fault is the message the call raises with, and
+* __host_save_fault_left is how many more calls raise: -1 for every call from
+* now on, which is the shape a real persistent fault has. The attempt is
+* counted before the raise, so a test can tell "never tried" from "tried and
+* failed" -- __host_saves counts only writes that landed.
+]]--
+__host_save_fault      = nil;
+__host_save_fault_left = 0;
+__host_save_attempts   = 0;
+
 local function merged(defaults, over)
     local out = {};
     if type(defaults) == 'table' then
@@ -812,6 +832,16 @@ package.loaded['settings'] = {
         return __host_settings;
     end,
     save = function ()
+        __host_save_attempts = __host_save_attempts + 1;
+        if __host_save_fault ~= nil and __host_save_fault_left ~= 0 then
+            if __host_save_fault_left > 0 then
+                __host_save_fault_left = __host_save_fault_left - 1;
+            end
+            -- Level 0: the message reaches the addon exactly as written,
+            -- with no 'stubs.py:NNN:' prefix, so a test can assert on what
+            -- the player is actually shown.
+            error(__host_save_fault, 0);
+        end
         __host_saves = __host_saves + 1;
         local session = __host_settings and __host_settings.session or '';
         __host_sessions[#__host_sessions + 1] = tostring(session);
@@ -1237,8 +1267,11 @@ class AshitaHost:
     fire_text_in(msg)   -- fire text_in with the host's real event shape
     chat                -- the captured console lines
     settings            -- the live settings table the addon holds
-    saves               -- how many settings.save() calls happened
+    saves               -- how many settings.save() calls actually wrote
+    save_attempts       -- how many were made, including ones that raised
     sessions            -- the session string recorded at each save
+    fail_saves(msg, n)  -- arm a settings.save() fault (n=-1: persistent)
+    heal_saves()        -- disarm it
     switch_profile(d)   -- fire the settings profile-switch callback
     set_party_name(n)   -- what AshitaCore reports as party member 0
     tick(seconds)       -- set the monotonic clock
@@ -1314,6 +1347,41 @@ class AshitaHost:
     @property
     def sessions(self):
         return _seq(self._g("__host_sessions"))
+
+    @property
+    def save_attempts(self):
+        """Every settings.save() call, landed or raised.
+
+        `saves` counts only the ones that wrote. The difference between the
+        two is how a test tells a write that was never attempted from one
+        that was attempted and failed -- which is the whole question when the
+        addon owes the disk a write and the disk refuses it.
+        """
+        return int(self._g("__host_save_attempts"))
+
+    def fail_saves(self, message="settings.save: the settings file is "
+                                 "read-only (100% full?)", times=-1):
+        """Make settings.save() raise instead of writing.
+
+        times=-1 (the default) is a persistent fault: every call from now on,
+        which is the shape a read-only file or a full disk really has. A
+        positive count raises that many times and then heals, for testing a
+        transient one.
+
+        The default message carries a percent sign on purpose. Error text
+        must reach the player as an argument and never as part of a format
+        string, and a stub whose faults are all format-safe cannot tell the
+        difference.
+        """
+        g = self.lua.globals()
+        g["__host_save_fault"] = message
+        g["__host_save_fault_left"] = times
+
+    def heal_saves(self):
+        """Disarm the settings.save() fault; later calls write again."""
+        g = self.lua.globals()
+        g["__host_save_fault"] = None
+        g["__host_save_fault_left"] = 0
 
     @property
     def strip_colors_calls(self):

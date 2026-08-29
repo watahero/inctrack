@@ -4138,6 +4138,137 @@ def test_addon_shell():
               "writing the run down too, so one render fault quietly became a "
               "lost Incursion")
 
+    # --- a disk that refuses the write (CR-02) ----------------------------
+    #
+    # persist() serialises the run, encodes it -- and that encode was the only
+    # part ever protected -- and then calls settings.save(), Ashita's
+    # synchronous disk write. When PERF-02 moved the call out of text_in's
+    # pcall it landed at the top of d3d_present with nothing around it, above
+    # the pcall that contains the render. A read-only settings file or a file
+    # another process has open therefore raised straight out of the frame
+    # handler, onto the game thread every addon in the process shares: the
+    # exact failure the render latch and the whole stack-repair apparatus
+    # exist to prevent, and it skipped the render for that frame, told the
+    # player nothing, dropped the write with the flag already consumed, and
+    # did it again on every subsequent owed write.
+    #
+    # Nothing here could be provoked before: the stub's save could not fail.
+    def frame_escape(host):
+        """Drive one d3d_present; return the error text if it got out."""
+        try:
+            host.fire("d3d_present")
+        except Exception as exc:                          # noqa: BLE001
+            return str(exc).splitlines()[0]
+        return None
+
+    faulty = loaded_host()
+    faulty.fire_text_in(begins())
+    faulty.fail_saves()
+    res.check(faulty.addon["incursion"]["save_due"] is True,
+              "the fixture owes no write, so the frame below would take the "
+              "flush branch not at all and prove nothing")
+    attempts_before = faulty.save_attempts
+    wrote_before = faulty.saves
+    chat_before = len(faulty.chat)
+    faulty.imgui.reset()
+
+    escaped = frame_escape(faulty)
+    res.check(escaped is None,
+              "a refused disk write threw out of d3d_present and into the "
+              "game thread every addon shares: %s" % escaped)
+    res.check(faulty.save_attempts > attempts_before,
+              "the frame never even tried the write it was owed, so the "
+              "check above passed for the wrong reason")
+    res.check(faulty.saves == wrote_before,
+              "the fixture's disk did not actually refuse the write, so "
+              "nothing below is measuring a failure")
+    res.check("Begin" in [name for name, _ in faulty.imgui.calls],
+              "a refused disk write cost the frame its window: the flush "
+              "sits above the render, so a raise there blanks a window that "
+              "has nothing wrong with it")
+
+    said = faulty.chat[chat_before:]
+    res.check(len(said) == 1,
+              "a refused disk write produced %d chat lines; every other "
+              "failure path in this addon says its piece exactly once"
+              % len(said))
+    res.check(any("read-only" in line for line in said),
+              "the player was told a write failed but not what the host "
+              "said about it: %r" % (said,))
+    res.check(any("100%" in line for line in said),
+              "the host's error text lost its percent sign on the way to "
+              "chat, which means it was pasted into the format string "
+              "instead of passed as an argument: %r" % (said,))
+    res.check(any("/incursion reset" in line for line in said),
+              "the player was told a write failed and not how to hear about "
+              "it again: %r" % (said,))
+
+    # Bounded, in both directions. Not dropped -- the flag goes back, because
+    # a run that is owed a write and never gets one comes back blank on the
+    # next reload. Not retried every frame either: a persistent fault would
+    # otherwise serialise, encode and fail sixty times a second on the game
+    # thread, which is the cost deferring the write existed to avoid.
+    res.check(faulty.addon["incursion"]["save_due"] is True,
+              "a refused write was dropped with the flag already consumed, "
+              "so nothing retries it and the run stays unwritten until some "
+              "later chat event happens to owe another one")
+    attempts_before = faulty.save_attempts
+    chat_before = len(faulty.chat)
+    for _ in range(4):
+        res.check(frame_escape(faulty) is None,
+                  "a second frame with a refused write escaped the handler")
+    res.check(faulty.save_attempts == attempts_before,
+              "a persistent disk fault was retried on every frame: %d "
+              "attempts across four frames, on the game thread"
+              % (faulty.save_attempts - attempts_before))
+    res.check(len(faulty.chat) == chat_before,
+              "the report-once latch did not hold: a persistent fault said "
+              "its piece %d more times" % (len(faulty.chat) - chat_before))
+
+    # Past the retry window it tries again, and when the disk comes back the
+    # run is written down -- the write was deferred, not discarded.
+    faulty.tick(6.0)
+    attempts_before = faulty.save_attempts
+    res.check(frame_escape(faulty) is None,
+              "the retry frame escaped the handler")
+    res.check(faulty.save_attempts > attempts_before,
+              "the write was never retried at all past its window, so it was "
+              "dropped after all -- only more slowly")
+
+    faulty.heal_saves()
+    faulty.tick(12.0)
+    faulty.fire("d3d_present")
+    res.check(faulty.saves > wrote_before,
+              "the run was never written down once the disk came back, so a "
+              "transient fault cost the whole Incursion")
+    res.check(faulty.addon["incursion"]["save_due"] is False,
+              "the flag stayed set after a write that landed, so the addon "
+              "now writes on every frame")
+    # Guarded rather than indexed straight, for the same reason the hidden-run
+    # check above is: when the containment is missing there is no written
+    # session at all, and these two have to be able to go red about it rather
+    # than raise and take every check in this suite down with them.
+    written = faulty.sessions[-1] if faulty.sessions else ""
+    res.check(written != "",
+              "what finally reached disk was empty, or nothing reached it: %r"
+              % (faulty.sessions[-1:],))
+    blob = faulty.json.decode(written) if written else None
+    res.check(blob is not None and blob["instance"] == SHELL_INSTANCE,
+              "what finally reached disk does not name the instance the "
+              "player is standing in: %r" % (written,))
+
+    # And the latch has the same way back as the other two. Healed first:
+    # reset() writes as well, and this is about hearing the complaint again,
+    # not about a second failure path.
+    res.check(faulty.addon["incursion"]["save_told"] is True,
+              "the report-once latch was never set, so the single chat line "
+              "above was a coincidence")
+    faulty.fire("command", command="/incursion reset")
+    res.check(faulty.addon["incursion"]["save_told"] is False,
+              "/incursion reset clears the render and parse latches and not "
+              "this one, so a player who has heard about a disk fault once "
+              "has no way to hear about it again")
+
     # --- an unload straight after a burst loses nothing -------------------
     #
     # The unload path is the one that cannot wait for a frame, and its

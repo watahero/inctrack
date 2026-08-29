@@ -63,6 +63,19 @@ local incursion = T{
     -- already exists and already runs every frame, which makes this a moved
     -- call rather than a new mechanism.
     save_due = false,
+    -- The earliest clock reading at which an owed write may be attempted.
+    -- Zero except after a failed one: see the frame handler. It is only ever
+    -- read when save_due is set, so the frames that owe nothing -- which is
+    -- almost all of them -- do not pay for it.
+    save_retry_at = 0,
+    -- Set the first time a write raised out of persist(). Ashita's
+    -- settings.save() is a synchronous disk write and can fail for reasons
+    -- that have nothing to do with this addon -- a read-only settings file, a
+    -- full disk, a file another process has open -- and such a fault is
+    -- persistent, so an unrated complaint is the same sentence once per owed
+    -- write for the rest of the session. Same rule, and deliberately the same
+    -- shape, as render_off and parse_told: one way of saying a thing once.
+    save_told = false,
     -- Set when ui.render raised inside d3d_present. The window takes itself
     -- off screen for the rest of the session rather than failing sixty times
     -- a second; /incursion and /incursion reset both clear it.
@@ -81,6 +94,12 @@ local incursion = T{
     -- deliberately the same shape -- one way of saying a thing once.
     parse_told = false,
 };
+
+-- How long an owed write that raised waits before the frame handler tries it
+-- again. The same five seconds the chat thread throttles ordinary writes
+-- with, deliberately: a retry that is bounded by a number already in the file
+-- is one fewer number to reason about.
+local SAVE_RETRY_SECONDS = 5.0;
 
 -- Events worth a disk write the moment they land, because the server never
 -- sends them again. Everything else rides the throttle.
@@ -128,14 +147,20 @@ local function reset(quiet)
     incursion.state:reset();
     incursion.override = nil;
     -- Clearing the run is also a way back from a window that switched itself
-    -- off, and from a chat handler that has stopped complaining, so
-    -- /incursion reset recovers both as well as the run.
+    -- off, from a chat handler that has stopped complaining, and from a disk
+    -- that has stopped being complained about, so /incursion reset recovers
+    -- all three as well as the run.
     incursion.render_off = false;
     incursion.parse_told = false;
+    incursion.save_told = false;
     -- The session string is emptied two lines below, so a write still owed
     -- from before the clear would put the run straight back over it on the
     -- next frame.
     incursion.save_due = false;
+    -- And a retry window armed by a write that failed belongs to that write.
+    -- Left standing it would hold the *next* run's first write back by up to
+    -- five seconds for no reason the player could see.
+    incursion.save_retry_at = 0;
     -- The boon shorthand memoised for the run belongs to a run that is gone.
     -- The window cannot notice this for itself: after a reset there is no run
     -- and it stops being drawn at all.
@@ -359,16 +384,61 @@ ashita.events.register('d3d_present', 'incursion_present', function ()
     * persist() cannot leave it set and retry sixty times a second. Same rule
     * the render latch follows.
     *
-    * The residual, stated rather than hidden: between the chat line and the
-    * next frame there is a window of roughly one frame in which the run is
-    * not on disk, and a crash inside it loses that one event. That is the
-    * trade, taken knowingly against a synchronous disk write on the game
-    * thread on every chat line the client receives. The unload handler
-    * writes unconditionally, so every orderly departure is covered.
+    * And the write is contained, for the same reason the render below is:
+    * this is the frame handler, and a raise here reaches the game thread
+    * every addon in the process shares. persist() serialises the run and
+    * encodes it -- that encode has always been protected -- and then calls
+    * settings.save(), which is Ashita's synchronous disk write and can fail
+    * for reasons that have nothing to do with this addon. Until the write
+    * moved here it ran inside text_in's pcall, where a fault cost one line;
+    * placed above the render pcall with nothing around it, it cost the
+    * frame, every other addon's ImGui stacks, and the write itself.
+    *
+    * A failure re-arms the flag rather than dropping what it was owed, and
+    * arms it behind the same five-second window the chat thread throttles
+    * with. Consumed-then-restored rather than left set: a persistent fault
+    * that retried on every frame would serialise, encode and fail sixty
+    * times a second on the game thread, which is the cost this deferral
+    * exists to avoid. Bounded retry is the middle: a transient fault costs
+    * five seconds, a persistent one costs one attempt per window and says so
+    * once.
+    *
+    * The residual, stated rather than hidden: the run is not on disk between
+    * the chat line and the next frame that actually runs. That is normally
+    * about one frame, but the bound is 'the next d3d_present', not '16 ms'
+    * -- the addon does not drive Present, so a minimised, alt-tabbed or
+    * background-throttled client stretches it as far as the client likes,
+    * and a client killed there loses everything since the last frame that
+    * ran rather than one event. The unload handler writes unconditionally,
+    * so every orderly departure is covered; the profile-switch callback
+    * discards what is owed on purpose, because it belongs to the character
+    * that just left. The other way to lose a write needs no crash at all: a
+    * raise inside persist(), which is why the raise below is caught,
+    * retried, and reported rather than left silent.
     ]]--
-    if incursion.save_due then
+    if incursion.save_due and now() >= incursion.save_retry_at then
         incursion.save_due = false;
-        persist();
+
+        local ok, err = pcall(persist);
+        if not ok then
+            incursion.save_due = true;
+            incursion.save_retry_at = now() + SAVE_RETRY_SECONDS;
+
+            -- Protected as a whole statement, and for the same reason as the
+            -- render report below: tostring(err) runs on an error value this
+            -- code did not author, and the text is an argument and never
+            -- part of the format string -- a percent sign in a path or a
+            -- host message is one of the things that gets us here.
+            if not incursion.save_told then
+                incursion.save_told = true;
+                pcall(function ()
+                    printf('Could not write the run down: %s -- it will be '
+                           .. 'retried, and further failures this session '
+                           .. 'will not be reported; /incursion reset to '
+                           .. 'hear them again.', tostring(err));
+                end);
+            end
+        end
     end
 
     -- Already failed once this session. Return before asking anything else,
@@ -552,14 +622,19 @@ settings.register('settings', 'incursion_settings_update', function (s)
         incursion.state:reset();
         incursion.override = nil;
         -- A render failure on the old character is not the new character's
-        -- problem, and neither is a line the old character's chat could not
-        -- be read from. This callback does its own clearing rather than
-        -- calling reset(), so both fields have to be cleared here too.
+        -- problem, neither is a line the old character's chat could not be
+        -- read from, and neither is a disk fault already reported. This
+        -- callback does its own clearing rather than calling reset(), so all
+        -- three fields have to be cleared here too.
         incursion.render_off = false;
         incursion.parse_told = false;
+        incursion.save_told = false;
         -- And a write owed by the old character must not land in the new
-        -- character's settings, which is where the next frame would put it.
+        -- character's settings, which is where the next frame would put it --
+        -- nor may a retry window armed by the old character's failed write
+        -- hold the new character's first write back.
         incursion.save_due = false;
+        incursion.save_retry_at = 0;
         -- And the boon shorthand memoised for the old character's run, for
         -- the same reason as the reset path: it belongs to nobody now.
         ui.forget();
