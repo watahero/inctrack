@@ -115,7 +115,13 @@ coordinate.
 ## Disconnects
 
 Zoning out, crashing, or reloading the addon mid-run does not lose the run.
-State is written to the addon's settings after every event and restored on load.
+State is written to the addon's settings and restored on load. The chat line
+that changes the run only marks it as owed a write — immediately for anything
+the server never repeats, and at most once every five seconds for everything
+else — and the next drawn frame performs the write, so nothing goes to disk
+while chat is being read. Unloading writes unconditionally, because there is no
+next frame to wait for. That leaves about one frame in which the newest event is
+not yet on disk; a hard crash inside it costs that one event and nothing more.
 
 This matters because the server's `Recovering session...` message only re-syncs
 the instance timer — it does **not** re-announce the objective, the phase, or
@@ -132,6 +138,8 @@ fact, and the window says which parts it cannot vouch for:
 | Boss kills missed | `Phases cleared` corrected — reaching phase N means N-1 were cleared |
 | Boss died while away | Kill progress cleared to `Waiting for next objective...` rather than frozen mid-count |
 | Bonus lapsed while away | Dropped, not left sitting at `0:00` |
+| Saved run could not be taken up | Said in chat — unreadable, too old, or not a shape this build knows — and a fresh run starts, rather than the window coming back blank and then filling with numbers nobody sent |
+| Window switched itself off after a draw error | Said in chat once, with `/incursion` as the stated way back |
 
 Everything clears as soon as real information arrives.
 
@@ -139,12 +147,15 @@ Everything clears as soon as real information arrives.
 
 ```
 inctrack/
-  inctrack.lua   Ashita glue: events, commands, settings, load banner
+  inctrack.lua           Ashita glue: events, commands, settings, load banner
   parser.lua             Chat line -> event. Pure Lua, stateless, two tiers
   state.lua              Event -> run record. Owns the timers
   ui.lua                 Draws the run record. Read-only
 test/run_tests.py        Test suite
+test/stubs.py            Recording ImGui and Ashita hosts, so the suite can
+                         reach ui.lua and inctrack.lua outside the game
 docs/design.md           Design notes and the full server message table
+CHANGELOG.md             What changed in each release
 ```
 
 `parser.lua` and `state.lua` have no Ashita dependency, so the test suite runs
@@ -155,9 +166,16 @@ pip install lupa
 python test/run_tests.py
 ```
 
-That runs the unit suites (objectives, bonus, recovery, invented future
-content, disconnects, timers). To also replay real runs, point it at a
-directory of Ashita chatlogs — the character name is read from the filenames:
+That runs everything that needs no private data: the state suites (objectives,
+bonus and recovery; invented future content; disconnects; timers), the window
+suite — the pure helpers plus whole-window render snapshots against a recording
+ImGui stub — the addon-shell suite, which drives `inctrack.lua` through its
+registered handlers against a stubbed Ashita host, and the reject-path cost
+figure, which prints what a chat line the addon ignores costs per line. Coverage
+of what actually ships is deliberately not gated on the author's own logs.
+
+To also replay real runs, point it at a directory of Ashita chatlogs — the
+character name is read from the filenames:
 
 ```bash
 python test/run_tests.py "C:\path\to\Ashita\chatlogs"
@@ -167,9 +185,9 @@ or set `INCURSION_CHATLOGS`. The persistence suite round-trips the save format
 through Ashita's own `json.lua`, found next to the chatlogs or via
 `INCURSION_ASHITA_LIBS`; it is skipped when unavailable.
 
-Against the author's logs — 120 days, 2.8M chat lines, 106 completed runs
-across 8 instances — every structural Incursion line parses, every run
-reconstructs correctly, and the generic tier stays dormant.
+Against the author's logs — 127 logs spanning 130 days, 2,951,129 chat lines,
+111 completed runs across 8 instances — every structural Incursion line parses,
+every run reconstructs correctly, and the generic tier stays dormant.
 
 There is no build step. Edit the `.lua` files and copy the folder across.
 

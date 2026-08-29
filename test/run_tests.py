@@ -3749,6 +3749,31 @@ def test_addon_shell():
               "the banner does not identify itself as inctrack, so it cannot "
               "be told from another Incursion addon: %r" % banner)
 
+    # --- and the changelog agrees with the number it reports --------------
+    #
+    # The version string is a claim made to players on every load, and the
+    # changelog is the only thing that says what the claim means. The two
+    # drifting apart is exactly the class of quiet wrongness this milestone
+    # exists to remove, and this is the cheapest guard against it recurring:
+    # the newest heading in CHANGELOG.md must name the version addon.version
+    # holds.
+    #
+    # Noted and skipped rather than failed when the file is absent. The addon
+    # folder is installable on its own -- that is how it is distributed -- so a
+    # CHANGELOG.md that is not beside it says nothing about the addon. Same
+    # rule the persistence suite follows for Ashita's json.lua.
+    changelog = os.path.join(os.path.dirname(HERE), "CHANGELOG.md")
+    if not os.path.isfile(changelog):
+        res.note("skipped: CHANGELOG.md not found beside the addon folder")
+    else:
+        with open(changelog, "r", encoding="utf-8") as fh:
+            headings = re.findall(r"^## +(\S+)", fh.read(), re.M)
+        newest = headings[0] if headings else None
+        res.check(newest == version,
+                  "the addon reports version %r and the newest changelog "
+                  "heading names %r, so the build and the record of what is "
+                  "in it disagree" % (version, newest))
+
     # --- the pcall boundary at inctrack.lua:160 ---------------------------
 
     # Forced from outside rather than by editing the addon: a Lua table as the
