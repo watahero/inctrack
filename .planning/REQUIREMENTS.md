@@ -48,8 +48,8 @@ Paths that are fragile but have not yet been observed to fail.
 The `text_in` handler runs on every chat line the client receives, forever.
 
 - [x] **PERF-01**: a non-Incursion chat line is rejected before any allocation or pattern matching is paid for — the cheap rejection runs first, not after
-- [ ] **PERF-02**: a settings write never blocks the chat thread synchronously
-- [ ] **PERF-03**: the memo cache has a bound, so a long session cannot grow it without limit
+- [x] **PERF-02**: a settings write never blocks the chat thread synchronously
+- [x] **PERF-03**: the memo cache has a bound, so a long session cannot grow it without limit
 - [x] **PERF-04**: per-line cost is measured against a recorded pre-change baseline and demonstrably lower, not merely assumed lower
 
 ### Documentation
@@ -98,8 +98,8 @@ Populated during roadmap creation (2026-08-29). See `.planning/ROADMAP.md` for p
 | HARD-05 | Phase 3 | Complete |
 | HARD-06 | Phase 3 | Complete |
 | PERF-01 | Phase 4 | Complete |
-| PERF-02 | Phase 4 | Pending |
-| PERF-03 | Phase 4 | Pending |
+| PERF-02 | Phase 4 | Complete |
+| PERF-03 | Phase 4 | Complete |
 | PERF-04 | Phase 4 | Complete |
 | DOC-01 | Phase 4 | Pending |
 | DOC-02 | Phase 4 | Pending |

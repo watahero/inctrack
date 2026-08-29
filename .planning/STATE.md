@@ -5,16 +5,16 @@ milestone_name: correctness and cost
 current_phase: 4
 current_phase_name: Cost and Record
 status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-08-29T08:35:00.639Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-08-29T08:53:31.660Z"
 last_activity: 2026-08-29
 last_activity_desc: "04-01 complete: parser.relevant gates the hot path before any allocation (needle derivation re-derived and checked over 2.95M lines, zero parsed lines gated out); reject path 3.5-5x with zero allocations; parse-error line got a report-once latch; three negative controls recorded"
-state_head: 6b60dc48111e1d03a6afdc2d943ea89aba9fc0d6
+state_head: 59c4e68067dc9b44f01e5e46d3df629b616910ce
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 11
-  completed_plans: 9
+  completed_plans: 10
   percent: 25
 ---
 
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 ## Current Position
 
 Phase: 4 of 4 (Cost and Record)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: 04-01 complete (PERF-01, PERF-04) — 04-02 (PERF-02, PERF-03) is next
 Last activity: 2026-08-29 — 04-01 complete: PERF-01's cheap gate lands before strip_colors (seven plain needles, each a literal every matcher requires under every alternation and optional group, re-derived from parser.lua and checked over 2,951,129 log lines with zero parsed lines gated out); a colour-code marker byte makes the gate decline to judge, so a false negative is impossible; PERF-04's benchmark prints the head-of-phase baseline (285,562 lines/s, 3.502 us/line) beside the shipped figure every run; adaptability 42 → 119, addon 143 → 160, parser still exactly 11819 and generic exactly 1; three negative controls recorded
 
@@ -69,6 +69,7 @@ Progress: [███░░░░░░░] 25% of phase 4 (1 of 3 plans)
 | Phase 3 P02 | 1h | 3 tasks | 2 files |
 | Phase 03 P03 | 16min | 3 tasks | 2 files |
 | Phase 04 P01 | 40min | 3 tasks | 4 files |
+| Phase 04 P02 | 15min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -120,6 +121,10 @@ Recent decisions affecting current work:
 - [Phase 4]: 04-01: the gsub counter is opt-in and never installed on a timed host; counting and timing are separate passes on separate hosts
 - [Phase 4]: 04-01: no rate is an acceptance threshold -- the one wall-clock assertion is a same-run same-corpus ratio with a 1.2x noise margin, which earned its keep at 1.96x on a busy run against 3.63x on a quiet one
 - [Phase 4]: 04-01: superset checks are written as an implication over fixtures, one per distinct SHAPE a matcher accepts, never as a copied list of expected booleans
+- [Phase 4]: PERF-02: text_in marks the run as owed a write; d3d_present flushes it above both early returns, so a hidden or latched-off window still writes the run down
+- [Phase 4]: The unload handler stays unconditional and does not consult the dirty flag -- that is what makes deferring every other write safe
+- [Phase 4]: PERF-03: the boon memo cache caps at 64 and drops whole, emptied in place so upvalue reflection keeps measuring the live table
+- [Phase 4]: A negative control that will not go red is a finding about the check: the plan's conditional-unload control could not discriminate, so a throttled-kill-count check was added
 
 ### Pending Todos
 
@@ -143,8 +148,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-08-29T08:35:00.344Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-08-29T08:53:20.208Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
 
 ## Deferred Verification
