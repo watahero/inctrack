@@ -31,6 +31,10 @@ instead, and the cost paid on every chat line cut.
   away before anything is built for it.
 - Saving the run no longer happens while chat is being read; it rides the next
   frame, and unloading still writes the run down unconditionally.
+- If that write is refused — a read-only settings file, or something else
+  holding it open — the addon says so once and keeps what it owes, retrying
+  shortly, rather than dropping the run in silence or letting the failure
+  reach the rest of the frame.
 - The boon shorthand the window remembers is now bounded, and is dropped when
   the run is cleared or you switch character.
 
