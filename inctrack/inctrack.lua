@@ -132,6 +132,46 @@ local function now()
 end
 
 --[[
+* React to a settings write that raised: keep what is owed, bound the retry,
+* and say so once.
+*
+* Three callers want exactly these three things -- the frame handler's flush,
+* reset()'s clear, and the load handler's discard of an unusable blob -- and
+* the shell already carries a comment saying that the profile-switch callback
+* duplicating reset()'s latch clearing is a thing to be remembered rather
+* than a thing that is shared. One copy of this, then, rather than three.
+*
+* Re-arming rather than dropping is the whole of it. A write that is owed and
+* never made is a run that is not on disk, and on the reset path it is worse
+* than that: the clear is owed to a write that no later frame would make, so
+* the run the player threw away is the one that comes back.
+*
+* Bounded, because a persistent fault -- a read-only settings file, a full
+* disk, a file another process holds -- would otherwise serialise, encode and
+* fail sixty times a second on the game thread, which is the cost deferring
+* the write exists to avoid.
+*
+* The report is protected as a whole statement, and the error text is an
+* argument and never part of the format string: tostring(err) runs on a value
+* this code did not author, and a percent sign in a path or a host message is
+* one of the things that gets us here.
+]]--
+local function save_failed(err)
+    incursion.save_due = true;
+    incursion.save_retry_at = now() + SAVE_RETRY_SECONDS;
+
+    if not incursion.save_told then
+        incursion.save_told = true;
+        pcall(function ()
+            printf('Could not write the run down: %s -- it will be '
+                   .. 'retried, and further failures this session '
+                   .. 'will not be reported; /incursion reset to '
+                   .. 'hear them again.', tostring(err));
+        end);
+    end
+end
+
+--[[
 * Persist the current run so a reload, crash, or zone-out mid-Incursion does
 * not lose it. The server never re-announces the objective on recovery, so
 * without this the window would come back blank for the rest of the phase.
@@ -203,7 +243,19 @@ local function reset(quiet)
     -- and it stops being drawn at all.
     ui.forget();
     incursion.settings.session = '';
-    settings.save();
+    -- Protected, and re-armed on failure, because of the two lines above:
+    -- save_due was just cleared so that a write owed from *before* the clear
+    -- could not put the run straight back, which leaves this write the only
+    -- one that will ever carry the clear. A raise here used to leave the
+    -- command handler for Ashita's dispatch and leave 'session = ""' owed to
+    -- a write no frame would make -- so the previous run stayed on disk and
+    -- was resumed on the next load, handing the player back the run they had
+    -- just thrown away. Catching the raise alone does not fix that; re-arming
+    -- is what makes the ordering safe in both directions.
+    local ok, err = pcall(settings.save);
+    if not ok then
+        save_failed(err);
+    end
     if not quiet then
         printf('Run cleared.');
     end
@@ -458,23 +510,9 @@ ashita.events.register('d3d_present', 'incursion_present', function ()
 
         local ok, err = pcall(persist);
         if not ok then
-            incursion.save_due = true;
-            incursion.save_retry_at = now() + SAVE_RETRY_SECONDS;
-
-            -- Protected as a whole statement, and for the same reason as the
-            -- render report below: tostring(err) runs on an error value this
-            -- code did not author, and the text is an argument and never
-            -- part of the format string -- a percent sign in a path or a
-            -- host message is one of the things that gets us here.
-            if not incursion.save_told then
-                incursion.save_told = true;
-                pcall(function ()
-                    printf('Could not write the run down: %s -- it will be '
-                           .. 'retried, and further failures this session '
-                           .. 'will not be reported; /incursion reset to '
-                           .. 'hear them again.', tostring(err));
-                end);
-            end
+            -- Keep what is owed, bound the retry, say so once: see
+            -- save_failed above, which reset() and the load handler share.
+            save_failed(err);
         end
     end
 
