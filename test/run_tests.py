@@ -141,11 +141,16 @@ KILLS_BODY = re.compile(r"^New Objective: Defeat \d+ enemies \((.+)\)$")
 
 # Mirrors the tightened Lua boon pattern deliberately, piece for piece. Two of
 # its pieces are the tightening and are the reason it is written out here
-# rather than reused from anywhere: the glyph group is `[^)]+`, a *non-empty*
-# run, where the shipped form allowed an empty one; and the name, once
-# trimmed, must be non-blank, which the pattern cannot say and the caller
-# checks. Everything else is the 1.1.0 shape unchanged.
-BOON_REF = re.compile(r"^(\S+) gains the effect of (.*?) \(([^)]+)\): (.+)$")
+# rather than reused from anywhere: the glyph group is `[^)]*`, which cannot
+# step over a `)` the way the shipped `.-` could; and the name, once trimmed,
+# must be non-blank, which the pattern cannot say and the caller checks.
+# Everything else is the 1.1.0 shape unchanged.
+#
+# The group is `*` and not `+`. Requiring it to be non-empty narrowed only
+# against the server -- the tail plus a non-blank name already separate a boon
+# from an ordinary buff -- on a matcher with no fallback tier under it, so a
+# `()` glyph group dropped a boon permanently.
+BOON_REF = re.compile(r"^(\S+) gains the effect of (.*?) \(([^)]*)\): (.+)$")
 BOON_PHRASE = " gains the effect of "
 
 
@@ -1729,8 +1734,8 @@ def test_future_content(lua, parser, State):
               "the mob list picked up an empty or untrimmed entry, which the "
               "window would draw as a blank name: %r" % (got,))
 
-    # -- HARD-04: a boon is a full '(<glyph>): <stats>' tail with a non-empty
-    # -- glyph group and a non-blank name. An ordinary buff is not a boon.
+    # -- HARD-04: a boon is a full '(<glyph>): <stats>' tail plus a non-blank
+    # -- name. An ordinary buff is not a boon.
 
     # The same raw high-byte run the state suite's boon fixture uses,
     # written as escapes here so an editor cannot quietly normalise it.
@@ -1742,9 +1747,34 @@ def test_future_content(lua, parser, State):
               is None,
               "a parenthesised aside with no ': ' after it was listed as a "
               "boon")
-    res.check(ev("Godwen gains the effect of Warding Aura (): Attack+5")
-              is None,
-              "a line with an empty glyph group was listed as a boon")
+    # WR-04. The glyph group may be empty. It is an icon code the parser
+    # throws away, and requiring it to be non-empty narrowed only against the
+    # server: what separates a boon from an ordinary buff is the tail and the
+    # non-blank name, both still demanded below. This matcher has no fallback
+    # tier under it the way the ' at ' forms do, so a boon refused here is
+    # refused for good -- the server never announces one twice.
+    e = ev("Godwen gains the effect of Warding Aura (): Attack+5")
+    res.check(e is not None and e["t"] == "boon"
+              and e["name"] == "Warding Aura"
+              and e["stats"] == "Attack+5",
+              "a boon whose glyph group was empty -- which is what the "
+              "server's own '%%s gains the effect of %%s (%%s): %%s' template "
+              "renders when the icon field is unset -- was dropped, and a "
+              "boon dropped here is gone for the rest of the run: %r" % (e,))
+
+    # The ')'-exclusion is the half of HARD-04 that is kept, and this is the
+    # line that tells the two halves apart: with a lazy '.-' the glyph group
+    # steps over the first ')' and swallows 'Signet) (X', leaving the name as
+    # 'Aura' -- a name the server did not send. With '[^)]' it cannot, so the
+    # split falls on the last group and the name keeps its own parentheses,
+    # the same rule the ' at ' matchers use.
+    e = ev("Godwen gains the effect of Aura (Signet) (%s): Attack+5" % GLYPH)
+    res.check(e is not None and e["t"] == "boon"
+              and e["name"] == "Aura (Signet)"
+              and e["stats"] == "Attack+5",
+              "the glyph group stepped over a ')' and took part of the boon's "
+              "own name with it: %r"
+              % ((e and (e["name"], e["stats"])),))
     res.check(ev("Godwen gains the effect of  (%s): Attack+5" % GLYPH) is None,
               "a boon with no name was listed, so the window would draw a "
               "blank row")

@@ -242,13 +242,31 @@ local specific = {
 
     -- Godwen gains the effect of Ronin's Revenge (<glyph>): WS Accuracy+15 / Store TP+8
     -- A boon chosen between phases. What makes this unambiguous is the tail: a
-    -- parenthesised glyph group that is *not empty*, immediately followed by a
-    -- colon and a space, and then the stats. Ordinary buffs ('gains the effect
-    -- of Protect.') have no such tail. The glyph is a client-side icon code and
-    -- is discarded. The name must be non-blank once trimmed, or there is no
-    -- boon to name and the window would draw an empty row.
+    -- parenthesised group, immediately followed by a colon and a space, and
+    -- then the stats -- plus a name that is not blank. Ordinary buffs ('gains
+    -- the effect of Protect.') have no such tail at all. The glyph is a
+    -- client-side icon code and is discarded.
+    --
+    -- '[^)]' rather than '.-' so the group cannot be a lazy match that steps
+    -- over a ')' and takes a later one; that is the part that narrows against
+    -- a real ambiguity. The group is allowed to be *empty*, which the '+' here
+    -- once forbade: emptiness separates nothing, because the tail plus the
+    -- non-blank name below already tell a boon from a buff, and this matcher
+    -- has no fallback tier under it the way the ' at ' forms do. A server data
+    -- table with an unset icon field renders '()' through the same
+    -- '%s gains the effect of %s (%s): %s' template, and a boon dropped there
+    -- is dropped for good: the server never announces a boon twice, which is
+    -- why it is a MUST_SAVE event in the first place.
+    --
+    -- The name must be non-blank once trimmed. That guard is doing the real
+    -- work: this is the loosest pattern in the file -- it has no 'Incursion
+    -- [', 'New Objective:' or '(Boss:' anchor -- so a blank name here means
+    -- the match probably found something that is not a boon at all. The
+    -- anchored boss forms are the opposite case and keep their blanks: there
+    -- a match is certainly a boss line, and what the server did say (the
+    -- location) is worth more than nothing.
     function(s)
-        local who, name, stats = s:match('^(%S+) gains the effect of (.-) %([^)]+%): (.+)$');
+        local who, name, stats = s:match('^(%S+) gains the effect of (.-) %([^)]*%): (.+)$');
         if who then
             name = trim(name);
             if name ~= '' then
