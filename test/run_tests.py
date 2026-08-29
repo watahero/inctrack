@@ -3676,6 +3676,59 @@ def test_addon_shell():
     res.check(shell_run(bad) is None,
               "a chat line that could not be read still started a run")
 
+    # --- and it says it once ----------------------------------------------
+    #
+    # A line the addon cannot read is rarely a one-off: a systematically
+    # malformed shape arrives on every chat line the client receives, so an
+    # unrated complaint is the same sentence sixty times in a burst, on top of
+    # the chat the player was trying to read. Same latch as the render path
+    # got in 03-01, and the same recovery: /incursion reset, or a character
+    # change.
+    #
+    # The check above is the counter-pin and stays exactly as it is: the first
+    # report is still made, and still exactly once. A guard that swallowed it
+    # would be a worse bug than the flood it prevents.
+    res.check(any("/incursion reset" in line for line in bad.chat[before:]),
+              "the addon went quiet about a line it could not read without "
+              "telling the player how to hear about it again: %r"
+              % (bad.chat[before:],))
+
+    quiet_from = len(bad.chat)
+    bad.fire_text_in(bad.lua.table_from({"also": "not a string"}))
+    bad.fire_text_in(bad.lua.table_from({"nor": "this"}))
+    res.check(len(bad.chat) == quiet_from,
+              "a second unreadable line complained again, so a malformed "
+              "shape arriving on every line would bury the player's chat: %r"
+              % (bad.chat[quiet_from:],))
+
+    # The way back, both of them. The addon does not export reset(), so this
+    # goes through the command handler exactly as the player does.
+    bad.fire("command", command="/incursion reset")
+    after_reset = len(bad.chat)
+    bad.fire_text_in(bad.lua.table_from({"still": "not a string"}))
+    res.check(len([line for line in bad.chat[after_reset:]
+                   if "parse error" in line]) == 1,
+              "/incursion reset is offered as the way back but does not "
+              "actually restore the report: %r" % (bad.chat[after_reset:],))
+
+    bad.switch_profile({"session": ""})
+    after_switch = len(bad.chat)
+    bad.fire_text_in(bad.lua.table_from({"new": "character"}))
+    res.check(len([line for line in bad.chat[after_switch:]
+                   if "parse error" in line]) == 1,
+              "a new character inherited the old one's silence about lines "
+              "the addon cannot read: %r" % (bad.chat[after_switch:],))
+
+    # And the failure path still only prints. Not the render latch: a parse
+    # error costs one line, not the frame, so nothing is disabled and the next
+    # line is still read.
+    res.check(shell_run(bad) is None,
+              "the report-once guard started resetting or disabling things on "
+              "the failure path")
+    bad.fire_text_in(begins())
+    res.check(shell_run(bad) is not None,
+              "an unreadable line stopped the handler reading the next one")
+
     # Read-only on the ordinary path too. This is the guarantee the comment at
     # inctrack.lua:156 makes and that nothing has tested until now.
     ordinary = begins()

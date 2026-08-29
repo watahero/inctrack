@@ -62,6 +62,14 @@ local incursion = T{
     -- the stack repair below a repair rather than a guess. Deliberately not
     -- cleared by reset(): it is a fact about the host, not about the run.
     render_ok  = false,
+    -- Set the first time the chat handler's pcall came back false. A line the
+    -- addon cannot read is not a one-off: a systematically malformed shape
+    -- arrives on every chat line the client receives, so an unrated complaint
+    -- is the same sentence sixty times in a burst. /incursion reset and a
+    -- character change both clear it, so the player has a stated way back
+    -- rather than having to reload the addon. Same rule as render_off, and
+    -- deliberately the same shape -- one way of saying a thing once.
+    parse_told = false,
 };
 
 -- Events worth a disk write the moment they land, because the server never
@@ -110,8 +118,10 @@ local function reset(quiet)
     incursion.state:reset();
     incursion.override = nil;
     -- Clearing the run is also a way back from a window that switched itself
-    -- off, so /incursion reset recovers the HUD as well as the run.
+    -- off, and from a chat handler that has stopped complaining, so
+    -- /incursion reset recovers both as well as the run.
     incursion.render_off = false;
+    incursion.parse_told = false;
     incursion.settings.session = '';
     settings.save();
     if not quiet then
@@ -259,8 +269,21 @@ ashita.events.register('text_in', 'incursion_text_in', function (e)
         end
     end);
 
-    if not ok then
-        printf('parse error: %s', tostring(err));
+    --[[
+    * The failure path only prints. It does not reset state, does not disable
+    * anything and does not stop the handler reading the next line -- this is
+    * not the render latch, because a parse error costs one line, not the
+    * frame. All the latch changes is how often the player hears about it.
+    *
+    * tostring(err) stays an argument and never becomes part of the format
+    * string: a percent sign in server text is one of the things that gets us
+    * here in the first place.
+    ]]--
+    if not ok and not incursion.parse_told then
+        incursion.parse_told = true;
+        printf('parse error: %s -- further ones this session will not be '
+               .. 'reported; /incursion reset to hear them again.',
+               tostring(err));
     end
 end);
 
@@ -456,9 +479,11 @@ settings.register('settings', 'incursion_settings_update', function (s)
         incursion.state:reset();
         incursion.override = nil;
         -- A render failure on the old character is not the new character's
-        -- problem. This callback does its own clearing rather than calling
-        -- reset(), so the field has to be cleared here too.
+        -- problem, and neither is a line the old character's chat could not
+        -- be read from. This callback does its own clearing rather than
+        -- calling reset(), so both fields have to be cleared here too.
         incursion.render_off = false;
+        incursion.parse_told = false;
         -- nil makes the text_in handler re-fetch the name on the next event,
         -- once the new character actually exists in memory.
         incursion.state:set_player(nil);
