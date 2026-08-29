@@ -27,8 +27,12 @@ instead, and the cost paid on every chat line cut.
 - A saved run in a shape this build does not recognise is discarded whole and
   said out loud, rather than half-applied in silence.
 - Clearing a run no longer lets its instance timer leak into the next one.
-- A chat line the addon does not care about now costs nothing — it is turned
-  away before anything is built for it.
+- A chat line the addon does not care about is now turned away before anything
+  is built for it: no copy of the line, no colour stripping, no pattern run.
+  About three and a half times cheaper on the reject path. A coloured line still
+  pays for its colour stripping, because the addon deliberately refuses to judge
+  a line it has not yet uncoloured — a colour code can land in the middle of the
+  very words it would be looking for.
 - Saving the run no longer happens while chat is being read; it rides the next
   frame, and unloading still writes the run down unconditionally.
 - If that write is refused — a read-only settings file, or something else
