@@ -653,6 +653,24 @@ function State:restore(data)
         return false;
     end
 
+    -- STALE_SECONDS is three hours; an Incursion is ninety minutes. So the
+    -- staleness rule alone lets a run come back that the instance clock
+    -- already proves is over -- the window would show ~0:00 in red beside an
+    -- elapsed counter past the instance duration, 'Waiting for next
+    -- objective...', and a phase count that will never move again, and it
+    -- would sit there until the player typed /incursion reset. Presenting a
+    -- finished run as live is exactly the failure this addon exists to avoid,
+    -- and the two facts needed to catch it -- the gap and the saved time_left
+    -- -- are both to hand here.
+    --
+    -- One minute of slack: the server reports whole minutes, and our own
+    -- countdown floors at zero, so the saved value can be up to a minute
+    -- short of the truth. Erring towards resuming keeps a run that might
+    -- still be live rather than discarding one that is.
+    if data.time_left and gap > data.time_left + 60 then
+        return false;
+    end
+
     local now = self:now();
     local run = new_run(self, data.instance, data.difficulty);
 

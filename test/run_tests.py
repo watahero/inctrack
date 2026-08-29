@@ -1291,6 +1291,51 @@ def test_timers(lua, parser, State):
     s3 = new_state(lua, State)
     res.check(not s3.restore(s3, blob), "restore accepted a stale snapshot")
 
+    # WR-04. The staleness window is three hours; an Incursion is ninety
+    # minutes. So a gap well inside the staleness rule can still be longer
+    # than the run had left, and after FIX-02 restore() holds both numbers.
+    # Ten minutes remaining, gone for two hours: the run ended without us
+    # whether or not we ever saw the completion, and resuming it would put a
+    # dead run on screen as a live one -- ~0:00 in red, an elapsed counter
+    # past the instance duration, a phase count that will never move -- until
+    # the player typed /incursion reset.
+    tick(0)
+    s3b = new_state(lua, State)
+    feed(s3b, parser, [
+        "You have 90 minutes remaining inside this Incursion.",
+        "Incursion [Davoi] Begins! (Normal)",
+    ])
+    tick(80 * 60)                      # eighty minutes in: ten left
+    expired = s3b.serialise(s3b)
+    res.check(abs(int(expired["time_left"]) - 10 * 60) <= 1,
+              "the fixture did not reach ten minutes remaining: %s"
+              % expired["time_left"])
+    expired["saved_at"] = expired["saved_at"] - (2 * 60 * 60)
+    s3c = new_state(lua, State)
+    res.check(not s3c.restore(s3c, expired),
+              "restore resumed a run the instance clock proves ended during "
+              "the gap -- two hours away with ten minutes left")
+    res.check(s3c.snapshot(s3c) is None,
+              "a refused restore left a half-applied run behind")
+
+    # The other side of the rule: a gap the run could have survived is still
+    # resumed, so this is a proof about the timer and not a second staleness
+    # window. Ninety seconds away with ten minutes left, plus the minute of
+    # slack the whole-minute server reports need.
+    tick(0)
+    s3d = new_state(lua, State)
+    feed(s3d, parser, [
+        "You have 90 minutes remaining inside this Incursion.",
+        "Incursion [Davoi] Begins! (Normal)",
+    ])
+    tick(80 * 60)
+    survives = s3d.serialise(s3d)
+    survives["saved_at"] = survives["saved_at"] - 90
+    s3e = new_state(lua, State)
+    res.check(bool(s3e.restore(s3e, survives)),
+              "restore threw away a run with minutes left on its clock after "
+              "a ninety-second gap")
+
     # Back-to-back runs: the second run's entry sync arrives while the first
     # (finished) run still occupies state -- 22:07:45 in the real logs. The
     # new run's clock must still be seeded from it.
