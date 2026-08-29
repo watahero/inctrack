@@ -4969,6 +4969,70 @@ def test_addon_shell():
               "written, so everything the throttle was holding is gone: %r"
               % (settling.sessions[-1],))
 
+    # --- an unload the disk refuses (D-04) --------------------------------
+    #
+    # This is the consequential one. The unload write is unconditional
+    # precisely because there will be no further frame, and that is what
+    # makes deferring every other write safe at all -- so a raise here loses
+    # everything since the last frame that ran, on the one path with no retry
+    # behind it, and escapes into Ashita's dispatch during addon unload or
+    # client shutdown on the way out.
+    #
+    # There is no better outcome available than this, and it is worth being
+    # plain about the ceiling: nothing can retry a write when there is
+    # nothing left to retry on. What the addon owes is that the failure is
+    # said out loud rather than swallowed, and that the raise does not reach
+    # the host.
+    departing = loaded_host()
+    departing.fire_text_in(begins())
+    departing.fire_text_in(SHELL_MOBS)
+    departing.fail_saves()
+    chat_before = len(departing.chat)
+    attempts_before = departing.save_attempts
+    escaped = fire_escape(departing, "unload")
+    res.check(escaped is None,
+              "a refused disk write threw out of the unload handler and into "
+              "Ashita's event dispatch, while the addon was being unloaded: "
+              "%s" % escaped)
+    res.check(departing.save_attempts > attempts_before,
+              "the unload handler never tried the write, so the check above "
+              "passed for the wrong reason")
+
+    said = departing.chat[chat_before:]
+    res.check(len(said) == 1,
+              "an unload whose write was refused produced %d chat lines. It "
+              "is the last write of the session and the only one with no "
+              "retry behind it; saying nothing makes it a silent loss"
+              % len(said))
+    res.check(any("100%" in line for line in said),
+              "the host's error text lost its percent sign on the way to "
+              "chat, which means it was pasted into the format string "
+              "instead of passed as an argument: %r" % (said,))
+    res.check(any("lost" in line.lower() for line in said),
+              "the unload report does not say what was actually lost. Every "
+              "other write in this addon is retried on a frame and says so; "
+              "this one cannot be, and a line promising a retry that will "
+              "never happen is worse than the truth: %r" % (said,))
+
+    # Told again even when the session has already heard it once, because it
+    # is not the same sentence: everything before this promised a retry on a
+    # frame, and there is no frame after this one.
+    quiet_end = loaded_host()
+    quiet_end.fire_text_in(begins())
+    quiet_end.fail_saves()
+    quiet_end.fire("d3d_present")
+    res.check(quiet_end.addon["incursion"]["save_told"] is True,
+              "the fixture never heard about the disk on a frame, so the "
+              "check below is not about a second report at all")
+    chat_before = len(quiet_end.chat)
+    res.check(fire_escape(quiet_end, "unload") is None,
+              "a refused write threw out of the unload handler")
+    said = quiet_end.chat[chat_before:]
+    res.check(len(said) == 1 and "lost" in said[0].lower(),
+              "a player who had already heard about the disk on a frame was "
+              "not told that the last write of the session had failed too, "
+              "which is the one that is not coming back: %r" % (said,))
+
     # --- a cleared run leaves nothing owed --------------------------------
     #
     # A write marked before the clear must not land after it: reset() has just
@@ -5247,6 +5311,49 @@ def test_addon_shell():
               "%d times, not once -- what they see instead is a HUD that "
               "came back empty for no stated reason: %r"
               % (len(bent_told), bent.chat if bent is not None else None))
+
+    # --- and the same discard onto a disk that refuses it (D-04) ----------
+    #
+    # The clear the check above pins is a settings.save() of its own, on the
+    # load handler, and it was the last write in the file with nothing around
+    # it. A raise there escapes into Ashita's event dispatch during addon
+    # load -- and the unusable string it was clearing stays on disk, so the
+    # next load meets it again.
+    #
+    # Same fault class as everywhere else, so the same three things are owed:
+    # do not escape, keep what is owed, say so.
+    stubborn = make_host(profile={"session": WRONG_SHAPE})
+    stubborn.require("inctrack")
+    stubborn.tick(0)
+    stubborn.fail_saves()
+    attempts_before = stubborn.save_attempts
+    escaped = fire_escape(stubborn, "load")
+    res.check(escaped is None,
+              "a refused disk write threw out of the load handler and into "
+              "Ashita's event dispatch, while the addon was loading: %s"
+              % escaped)
+    res.check(stubborn.save_attempts > attempts_before,
+              "the load handler never tried to clear the unusable session, "
+              "so the check above passed for the wrong reason")
+    res.check(len([line for line in stubborn.chat
+                   if "could not be resumed" in line]) == 1,
+              "the raise took the load handler down before it could say the "
+              "saved run was thrown away: %r" % (stubborn.chat,))
+    res.check(any("100%" in line for line in stubborn.chat),
+              "the disk refused the clear and the player was told nothing "
+              "about it: %r" % (stubborn.chat,))
+    res.check(stubborn.addon["incursion"]["save_due"] is True,
+              "the clear of an unusable session was dropped when the disk "
+              "refused it, so nothing retries it and the string is met again "
+              "on the next load")
+
+    stubborn.heal_saves()
+    stubborn.tick(6.0)
+    stubborn.fire("d3d_present")
+    res.check(bool(stubborn.sessions) and stubborn.sessions[-1] == "",
+              "the unusable session never reached disk as cleared once the "
+              "disk came back, so it is retried on every load forever: %r"
+              % (stubborn.sessions[-1:],))
 
     # And the one refusal that is not a loss stays quiet. restore() turns a
     # finished run away on purpose -- there is nothing left to resume -- and
