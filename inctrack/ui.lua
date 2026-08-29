@@ -23,6 +23,49 @@
 *     Phases cleared 2                      Elapsed 4:00
 *     Ronin's Revenge                   WS Acc+15 STP+8
 *     Stallwart's Sentinel                VIT+10 DT-15%
+*
+* The sample is one shape out of many, and it cannot show the rows that only
+* appear when something has gone sideways. Below is every row the window can
+* draw, in the order render() draws them, with the condition each appears
+* under. A whole-window snapshot in the suite is reviewed against this list
+* before it is pasted in, so a row missing here is a row nothing pins.
+*
+*   1. An invisible spacer, CONTENT_W wide. Every frame, unconditionally: it
+*      is what holds the width of an auto-resizing window still.
+*   2. Header. The instance name always, then '. <difficulty>' when one is
+*      known. Right-aligned on the same line: 'Complete <the server's own run
+*      time>' once the run has finished, otherwise the instance clock as
+*      '~mm:ss' -- or '--:--' when no timer sync has landed yet.
+*   3. 'reconnected - awaiting update', while the run is desynced and has not
+*      finished.
+*   4. The objective block. Nothing at all once the run is finished; otherwise
+*      exactly one of:
+*        - a full orange bar 'BOSS  <name>  <loc>', once the kills are done;
+*        - the phase bar, labelled 'Phase #N  cur/max' -- amber and suffixed
+*          ' ?' while desynced -- and under it the mob list, suffixed '  (?)'
+*          when it belongs to a phase the server never confirmed for us, and
+*          then 'Next: <name>' with the coordinates right-aligned, when a boss
+*          preview is held;
+*        - an objective wording the parser did not recognise, drawn verbatim
+*          and wrapped;
+*        - 'Waiting for next objective...', when there is no objective at all
+*          -- a run picked up mid-phase, which the server does not re-announce.
+*   5. The bonus row, while a bonus is held and has not lapsed:
+*      'BONUS  Complete!' once done, otherwise 'BONUS <label>' with '  cur/max'
+*      when it counts past one or its coordinates when it names a place, the
+*      countdown right-aligned when one is known, and a thin progress strip
+*      beneath when it counts.
+*   6. One row per counter in a shape the parser does not specifically know:
+*      the label, then 'cur/max' right-aligned above a thin strip when it has
+*      a maximum, or 'done' right-aligned when it has none. Gone once the run
+*      has finished.
+*   7. 'Phases cleared N' with 'Elapsed m:ss' right-aligned. Always, and the
+*      only stats row there is: points are tracked in state.lua and are
+*      deliberately never displayed.
+*   8. One row per boon picked this run, in pick order: the name, and the
+*      stats right-aligned in the usual FFXI shorthand.
+*   9. The most recent Incursion line the parser could not interpret, for the
+*      thirty seconds it stays fresh.
 ]]--
 
 local imgui = require('imgui');
