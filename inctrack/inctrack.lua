@@ -53,6 +53,16 @@ local incursion = T{
     -- lasts until the next run starts.
     override = nil,
     save_at  = 0,
+    -- Set when the run has changed and is owed a disk write; cleared by the
+    -- frame handler, which performs it. The chat thread decides *whether* a
+    -- write is owed -- that arithmetic is unchanged -- and the frame handler
+    -- does the writing, because persist() serialises the run, encodes it as
+    -- JSON and calls settings.save(), and text_in runs on the game thread on
+    -- every chat line the client receives. Ashita exposes no asynchronous
+    -- write, so the flush rides the frame handler beside this one: it
+    -- already exists and already runs every frame, which makes this a moved
+    -- call rather than a new mechanism.
+    save_due = false,
     -- Set when ui.render raised inside d3d_present. The window takes itself
     -- off screen for the rest of the session rather than failing sixty times
     -- a second; /incursion and /incursion reset both clear it.
@@ -122,6 +132,10 @@ local function reset(quiet)
     -- /incursion reset recovers both as well as the run.
     incursion.render_off = false;
     incursion.parse_told = false;
+    -- The session string is emptied two lines below, so a write still owed
+    -- from before the clear would put the run straight back over it on the
+    -- next frame.
+    incursion.save_due = false;
     incursion.settings.session = '';
     settings.save();
     if not quiet then
@@ -208,6 +222,11 @@ end);
 * event: unload
 ]]--
 ashita.events.register('unload', 'incursion_unload', function ()
+    -- Unconditional, and deliberately so: it does not consult save_due. This
+    -- is the one path that cannot wait for a frame -- there will not be
+    -- another one -- and its unconditional write is what makes deferring
+    -- every other write safe at all. Nothing is owed afterwards.
+    incursion.save_due = false;
     persist();
 end);
 
@@ -261,10 +280,15 @@ ashita.events.register('text_in', 'incursion_text_in', function (e)
             -- objective and boss above all, since 'Recovering session...' does
             -- not re-announce them. Kill counts arrive constantly and are
             -- cheap to lose, so those only force a save every few seconds.
+            --
+            -- The decision is made here and the write is not: this is
+            -- arithmetic on a number, and the disk write it used to make
+            -- inline is now owed to the frame handler. The policy the player
+            -- experiences is unchanged.
             local t = now();
             if MUST_SAVE[event.t] or (t - incursion.save_at) > 5.0 then
                 incursion.save_at = t;
-                persist();
+                incursion.save_due = true;
             end
         end
     end);
@@ -288,6 +312,20 @@ ashita.events.register('text_in', 'incursion_text_in', function (e)
 end);
 
 --[[
+* Hoisted render arguments. ui.render reads two fields off this table and
+* keeps no handle on it -- passed, read, dropped -- so building a fresh one
+* sixty times a second is pure GC churn. Same reason, and the same shape, as
+* ui.lua's own hoisted ARG_* tables.
+*
+* locked is rewritten each frame; visible is fixed true because the frame
+* handler has already returned above when the window is not on screen.
+]]--
+local FRAME_OPTS = {
+    visible = true,
+    locked  = false,
+};
+
+--[[
 * event: d3d_present
 *
 * ui.render runs here, on the game thread, once per frame. It is handed
@@ -301,6 +339,34 @@ end);
 * a pure draw function.
 ]]--
 ashita.events.register('d3d_present', 'incursion_present', function ()
+    --[[
+    * The deferred write, and it sits here on purpose: above both of the
+    * early returns below.
+    *
+    * The handler returns when the window latched itself off after a render
+    * error, and again when the window is simply not on screen. A player
+    * running with automatic show/hide off is still playing the run, and so
+    * is one whose window latched off -- so a flush placed under either
+    * return means their Incursion is never written down at all, and a
+    * mid-run reload comes back blank. Nothing about drawing the window has
+    * anything to do with owing the disk a write.
+    *
+    * The flag is consumed *before* the write, not after, so a raise inside
+    * persist() cannot leave it set and retry sixty times a second. Same rule
+    * the render latch follows.
+    *
+    * The residual, stated rather than hidden: between the chat line and the
+    * next frame there is a window of roughly one frame in which the run is
+    * not on disk, and a crash inside it loses that one event. That is the
+    * trade, taken knowingly against a synchronous disk write on the game
+    * thread on every chat line the client receives. The unload handler
+    * writes unconditionally, so every orderly departure is covered.
+    ]]--
+    if incursion.save_due then
+        incursion.save_due = false;
+        persist();
+    end
+
     -- Already failed once this session. Return before asking anything else,
     -- so the failure costs one branch a frame instead of repeating.
     if incursion.render_off then
@@ -311,10 +377,13 @@ ashita.events.register('d3d_present', 'incursion_present', function ()
         return;
     end
 
-    local ok, err = pcall(ui.render, incursion.state, {
-        visible = true,
-        locked  = incursion.settings.locked,
-    });
+    -- One field a frame, into the table hoisted above. visible is fixed
+    -- because the handler has already returned when the window is not on
+    -- screen -- a later reader would otherwise wonder why it is not read
+    -- from visible().
+    FRAME_OPTS.locked = incursion.settings.locked;
+
+    local ok, err = pcall(ui.render, incursion.state, FRAME_OPTS);
 
     if ok then
         -- A frame that took render's early return proves nothing about the
@@ -484,6 +553,9 @@ settings.register('settings', 'incursion_settings_update', function (s)
         -- calling reset(), so both fields have to be cleared here too.
         incursion.render_off = false;
         incursion.parse_told = false;
+        -- And a write owed by the old character must not land in the new
+        -- character's settings, which is where the next frame would put it.
+        incursion.save_due = false;
         -- nil makes the text_in handler re-fetch the name on the next event,
         -- once the new character actually exists in memory.
         incursion.state:set_player(nil);
