@@ -5902,6 +5902,44 @@ def test_record(parser):
               "table still wrong"
               % (rows, functions - 1 + parser_lines))
 
+    # --- no field of State is written and never read ----------------------
+    #
+    # state.lua is roughly 60% prose and its comments are load-bearing, so a
+    # field that every mutating branch assigns reads, to anyone arriving in
+    # this file first, as the thing that drives the behaviour it sits beside.
+    # `dirty` was exactly that: assigned by twenty branches and by reset(),
+    # read by nothing -- not by inctrack.lua, not by ui.lua, not by this
+    # harness -- and never cleared, so even a reader who wired it up would
+    # find it latched true after the first event. What actually decides the
+    # disk write is MUST_SAVE plus the five-second throttle in inctrack.lua,
+    # two files away.
+    #
+    # Derived rather than grepped for by name, so this outlives the one field
+    # it was written for: every `self.X` state.lua assigns must be read
+    # somewhere -- in state.lua itself, or through the handle the shell and
+    # the UI hold.
+    state_src = repo_text("inctrack", "state.lua")
+    read_src = state_src + repo_text("inctrack", "inctrack.lua") \
+        + repo_text("inctrack", "ui.lua")
+    assigned = sorted(set(re.findall(r"self\.(\w+)\s*=[^=]", state_src)))
+    res.check(len(assigned) >= 4,
+              "state.lua assigns %d fields on self, so the check below is "
+              "not walking the fields that exist" % len(assigned))
+    write_only = []
+    for field in assigned:
+        # A read is any mention that is not an assignment target: self.X in
+        # state.lua, and .X through the state handle in the other two files.
+        reads = len(re.findall(r"(?:self|state)\.%s\b(?!\s*=[^=])" % field,
+                               read_src))
+        if not reads:
+            writes = len(re.findall(r"self\.%s\s*=[^=]" % field, state_src))
+            write_only.append("%s (%d writes, 0 reads)" % (field, writes))
+    res.check(not write_only,
+              "state.lua carries a field nothing reads: %s. A vestigial field "
+              "in a file whose comments are this load-bearing is a navigation "
+              "hazard -- it tells a reader the state machine works in a way "
+              "it does not" % ", ".join(write_only))
+
     # --- every citation in the harness points at something that exists ----
     #
     # The harness pins each stub and each fixture to the shipped statement it
