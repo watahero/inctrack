@@ -1093,6 +1093,141 @@ def test_future_content(lua, parser, State):
     res.check(s8.snapshot(s8)["instance"] == before and s8.note(s8) is None,
               "ordinary chat mentioning Incursion leaked into the window")
 
+    # ---- the tightened patterns: what they must get right, and what they
+    # ---- must now decline ------------------------------------------------
+    #
+    # Three patterns admit or mangle shapes the server has not yet sent. None
+    # has been observed to fail; each is a place where the window would show
+    # something the server did not say. The fixtures below are invented
+    # content in the server's established wording, as the rest of this suite
+    # is. The failure messages say what the player would see, because that is
+    # what is at stake -- a truncated boss name with its tail folded into the
+    # coordinates, mobs that do not exist, a buff row masquerading as a boon.
+    #
+    # The corresponding "and nothing real stopped parsing" guarantee is not
+    # here: it is the parser suites over the 127-log corpus, which pin the
+    # structural parse count and keep the generic tier silent.
+
+    def ev(line):
+        return parser.parse(line)
+
+    # -- HARD-02: the split anchors on the last ' at ' before the coordinate
+    # -- group, so a name carrying that substring survives whole.
+
+    AT_NAME = "Warden at the Ninth Gate"
+    AT_LOC = "(K-7) (Map #4)"
+
+    e = ev("New Objective: Defeat %s at %s!" % (AT_NAME, AT_LOC))
+    res.check(e is not None and e["t"] == "objective_boss"
+              and e["name"] == AT_NAME,
+              "a boss whose own name contains ' at ' was shown truncated: %r"
+              % (e and e["name"]))
+    res.check(e is not None and e["loc"] == AT_LOC,
+              "part of the boss's name was folded into its coordinates: %r"
+              % (e and e["loc"]))
+
+    e = ev("(Boss: %s at %s)" % (AT_NAME, AT_LOC))
+    res.check(e is not None and e["t"] == "boss_hint" and e["name"] == AT_NAME,
+              "the boss waiting at the end of the phase was named wrong: %r"
+              % (e and e["name"]))
+    res.check(e is not None and e["loc"] == AT_LOC,
+              "the boss hint's coordinates carried part of its name: %r"
+              % (e and e["loc"]))
+
+    e = ev("Bonus Objective: Defeat %s at %s! (Expires in 10 Minutes)"
+           % (AT_NAME, AT_LOC))
+    res.check(e is not None and e["t"] == "bonus_new" and e["kind"] == "nm"
+              and e["label"] == AT_NAME,
+              "the bonus NM was shown under a truncated name: %r"
+              % (e and e["label"]))
+    res.check(e is not None and e["loc"] == AT_LOC,
+              "the bonus NM's coordinates carried part of its name: %r"
+              % (e and e["loc"]))
+
+    # The fallback still answers: trailing text that is not a parenthesised
+    # coordinate group parses exactly as it does today. Nothing that reaches
+    # the window now stops reaching it.
+    e = ev("New Objective: Defeat Gate Sentry at the northern span!")
+    res.check(e is not None and e["t"] == "objective_boss"
+              and e["name"] == "Gate Sentry",
+              "a boss objective with no coordinates vanished from the window "
+              "entirely: %r" % (e and e["t"]))
+    res.check(e is not None and e["loc"] == "the northern span",
+              "a boss objective with no coordinates lost its location: %r"
+              % (e and e["loc"]))
+
+    # The ordering contract still holds: the count form claims a bonus whose
+    # label happens to carry the substring, and a kill objective is still a
+    # kill objective.
+    e = ev("Bonus Objective: Defeat 6 Wardens at Rest! (Expires in 10 Minutes)")
+    res.check(e is not None and e["t"] == "bonus_new" and e["kind"] == "kills"
+              and e["label"] == "Wardens at Rest" and int(e["max"]) == 6,
+              "a counted bonus objective was drawn as a single named NM, so "
+              "its progress bar would never move: %r"
+              % ((e and (e["kind"], e["label"])),))
+    e = ev("New Objective: Defeat 12 enemies (Cave Bat, Cave Worm)")
+    res.check(e is not None and e["t"] == "objective_kills"
+              and int(e["count"]) == 12,
+              "a kill objective was read as a boss, losing the kill count: %r"
+              % (e and e["t"]))
+
+    # -- HARD-03: the list separator is comma-space, so a name carrying its
+    # -- own comma is one mob and not two.
+
+    def mobs(line):
+        e = ev(line)
+        return None if e is None else list(e["mobs"].values())
+
+    got = mobs("New Objective: Defeat 9 enemies (Kalamainu,Prime, Cave Bat)")
+    res.check(got == ["Kalamainu,Prime", "Cave Bat"],
+              "a mob whose name contains a comma was split into two mobs "
+              "that do not exist: %r" % (got,))
+    res.check(got is not None and len(got) == 2,
+              "the mob list shows the wrong number of mobs: %r" % (got,))
+
+    got = mobs("New Objective: Defeat 20 enemies (Alpha, Beta, Gamma)")
+    res.check(got == ["Alpha", "Beta", "Gamma"],
+              "an ordinary comma-space list no longer splits the way it "
+              "does today: %r" % (got,))
+    got = mobs("New Objective: Defeat 20 enemies (Alpha,  Beta,Gamma, )")
+    res.check(got == ["Alpha", "Beta,Gamma"],
+              "the mob list picked up an empty or untrimmed entry, which the "
+              "window would draw as a blank name: %r" % (got,))
+
+    # -- HARD-04: a boon is a full '(<glyph>): <stats>' tail with a non-empty
+    # -- glyph group and a non-blank name. An ordinary buff is not a boon.
+
+    # The same raw high-byte run the state suite's boon fixture uses,
+    # written as escapes here so an editor cannot quietly normalise it.
+    GLYPH = "\u0081\u0098\u0081\u0098"
+
+    res.check(ev("Godwen gains the effect of Protect.") is None,
+              "an ordinary buff was listed among the boons picked this run")
+    res.check(ev("Godwen gains the effect of Warding Aura (Signet) Attack+5")
+              is None,
+              "a parenthesised aside with no ': ' after it was listed as a "
+              "boon")
+    res.check(ev("Godwen gains the effect of Warding Aura (): Attack+5")
+              is None,
+              "a line with an empty glyph group was listed as a boon")
+    res.check(ev("Godwen gains the effect of  (%s): Attack+5" % GLYPH) is None,
+              "a boon with no name was listed, so the window would draw a "
+              "blank row")
+
+    e = ev("Godwen gains the effect of Warding Aura (%s): Attack+15 / "
+           "Defense+8" % GLYPH)
+    res.check(e is not None and e["t"] == "boon"
+              and e["name"] == "Warding Aura",
+              "a real boon stopped reaching the window: %r" % (e,))
+    res.check(e is not None and e["stats"] == "Attack+15 / Defense+8",
+              "a real boon's stats were mangled: %r" % (e and e["stats"]))
+    e = ev("Godwen gains the effect of Vanguard's Ward (%s): VIT+10 / "
+           "Damage taken-15%%" % GLYPH)
+    res.check(e is not None and e["t"] == "boon"
+              and e["stats"] == "VIT+10 / Damage taken-15%",
+              "a boon whose stats carry a percent sign was lost or mangled: "
+              "%r" % ((e and (e["name"], e["stats"])),))
+
     return res
 
 
