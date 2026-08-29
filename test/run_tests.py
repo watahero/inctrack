@@ -3890,6 +3890,61 @@ def test_addon_shell():
     res.check(shell_run(back) is None,
               "/incursion reset kept the run it was asked to clear")
 
+    # --- WR-03: the repair's own lookups run inside their pcalls -----------
+    #
+    # `pcall(imgui.End)` evaluates imgui.End *before* pcall is entered. In
+    # Ashita imgui is a constants table whose __index is
+    # AshitaCore:GetGuiManager(), so that read is a live call into the GUI
+    # manager and can raise on its own -- and a raise from it is outside the
+    # pcall that was written to contain it, so it escapes d3d_present into
+    # the game thread every addon shares. That is the second error of the
+    # frame the block comment says can never happen.
+    #
+    # The recorder is an ordinary table and cannot produce this on its own,
+    # so the stub models it: arm_lookup_fault lifts the entry point out of
+    # the table and raises from the read. It asserts nothing about how
+    # Ashita's binding behaves; it puts the raise where the language puts it.
+
+    for entry in ("End", "PopStyleVar"):
+        lookup = loaded_host()
+        lookup.fire_text_in(begins())
+        lookup.fire_text_in(phase_line(1, 3))
+        lookup.fire_text_in(SHELL_MOBS)
+
+        # A clean frame first, which is what earns the repair at all: with
+        # render_ok unset the shell repairs nothing and the lookup is never
+        # reached.
+        lookup.imgui.reset()
+        one_frame(lookup)
+        res.check("Begin" in drawn_names(lookup),
+                  "no clean frame was drawn before the %s case, so the "
+                  "repair below is never attempted and the case proves "
+                  "nothing" % entry)
+
+        shell_run(lookup)["objective"]["mobs"][1] = True
+        lookup.imgui.reset()
+        lookup.imgui.arm_lookup_fault(entry)
+        chat_before = len(lookup.chat)
+        escaped = one_frame(lookup)
+
+        res.check(escaped is None,
+                  "the stack repair's own lookup of imgui.%s raised outside "
+                  "its pcall and threw out of d3d_present, into the game "
+                  "thread every addon shares -- the second error of the "
+                  "frame the handler exists to prevent: %s" % (entry, escaped))
+        res.check(entry not in drawn_names(lookup),
+                  "imgui.%s was called, so the lookup never raised and this "
+                  "case is green without having been asked anything: %r"
+                  % (entry, drawn_names(lookup)))
+        res.check(lookup.addon["incursion"]["render_off"] is True,
+                  "a lookup that raised during the repair left the window "
+                  "switched on, so the same failure repeats every frame")
+        said = lookup.chat[chat_before:]
+        res.check(len(said) == 1 and "/incursion" in said[0],
+                  "a repair whose lookup raised swallowed the one line that "
+                  "tells the player what happened and how to get the window "
+                  "back: %r" % (said,))
+
     # --- WR-02: the recovery path the error message advertises -------------
     #
     # The error line names /incursion as the way back, so what /incursion

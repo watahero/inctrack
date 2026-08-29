@@ -340,6 +340,7 @@ function S.reset()
     S.last_end = PADDING;
     S.armed = false;
     S.fault = nil;
+    S.disarm_lookup();
 end
 
 function S.arm()
@@ -359,6 +360,56 @@ end
 function S.arm_fault(name, contains)
     S.fault = { name = name, contains = contains };
 end
+
+--[[
+* Arm a one-shot raise from the *lookup* of an entry point, rather than from
+* the call.
+*
+* In Ashita, `imgui` is a constants table whose __index is
+* AshitaCore:GetGuiManager(), so `imgui.End` is not a table read: it is a
+* live metatable call into the GUI manager. An expression like
+* `pcall(imgui.End)` evaluates that lookup *before* pcall is entered, so a
+* raise from the lookup is not protected by the pcall that was written to
+* protect the call.
+*
+* The stub is an ordinary table, so that hazard cannot arise here on its own.
+* This models it: the named function is lifted out of the table and an
+* __index is installed that raises for that one key. The function is put
+* back as the raise fires, so one arming is one raise and the next frame
+* draws normally.
+*
+* What this is not: a claim that Ashita's GUI manager does raise. It models
+* the consequence so the containment can be tested at all.
+]]--
+function S.arm_lookup_fault(name)
+    S.disarm_lookup();
+    S.lookup = { name = name, fn = rawget(imgui, name) };
+    rawset(imgui, name, nil);
+end
+
+function S.disarm_lookup()
+    local armed = S.lookup;
+    if armed == nil then
+        return;
+    end
+    S.lookup = nil;
+    rawset(imgui, armed.name, armed.fn);
+end
+
+-- Only ever consulted for a key that arm_lookup_fault has removed: every
+-- entry point below is a real key in this table, so an ordinary lookup is a
+-- rawget hit and never reaches here.
+setmetatable(imgui, {
+    __index = function (_, key)
+        local armed = S.lookup;
+        if armed ~= nil and armed.name == key then
+            S.disarm_lookup();
+            error('injected imgui fault: looking up ' .. tostring(key)
+                  .. ' raised', 0);
+        end
+        return nil;
+    end,
+});
 
 S.api = imgui;
 S.px_per_char = PX_PER_CHAR;
@@ -541,6 +592,23 @@ class ImGuiRecorder:
         is logged and counted first, then raises.
         """
         self._s["arm_fault"](name, contains)
+
+    def arm_lookup_fault(self, name):
+        """Arm a one-shot raise from the *lookup* of `imgui.<name>`.
+
+        Ashita's `imgui` is a constants table whose __index is
+        AshitaCore:GetGuiManager(), so reading `imgui.End` is a live call
+        into the GUI manager and can raise on its own. Lua evaluates that
+        read before entering `pcall`, so `pcall(imgui.End)` leaves the read
+        unprotected -- which matters most in the error handler inside
+        d3d_present, where a second raise escapes into the game thread every
+        addon shares.
+
+        The arming is consumed by the raise and reset() disarms it. Same
+        caveat as arm_fault: this models the consequence, and asserts
+        nothing about how the real binding behaves.
+        """
+        self._s["arm_lookup_fault"](name)
 
     def balance(self):
         """Unbalanced stacks are a frame-rate bug, so record them from the

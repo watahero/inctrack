@@ -292,19 +292,32 @@ ashita.events.register('d3d_present', 'incursion_present', function ()
     * data-driven reaches it and no test provokes it.
     *
     * Each repair call is protected on its own, for the same reason as above:
-    * neither of them may become the second error of the frame either.
+    * neither of them may become the second error of the frame either. The
+    * *lookups* go inside the pcall too, and that is not a formality:
+    * `pcall(imgui.End)` reads imgui.End before pcall is entered, and imgui
+    * here is Ashita's constants table whose __index is
+    * AshitaCore:GetGuiManager() (see the require at the top of this file), so
+    * the read is a live call into the GUI manager. A raise from the read of
+    * an unparenthesised `pcall(imgui.End)` escapes this handler exactly as
+    * the failed render would have -- into d3d_present, on the game thread
+    * every addon in the process shares. A closure moves the read inside.
     ]]--
     if incursion.render_ok then
-        pcall(imgui.End);
-        pcall(imgui.PopStyleVar, 1);
+        pcall(function () imgui.End(); end);
+        pcall(function () imgui.PopStyleVar(1); end);
     end
 
     incursion.render_off = true;
 
-    -- The error text is an argument and never part of the format string: a
-    -- percent sign in server text is one of the things that gets us here.
-    printf('Render error, window disabled: %s -- /incursion to try again.',
-           tostring(err));
+    -- Protected for the same reason, and the whole statement rather than the
+    -- call alone: tostring(err) runs on an error value this code did not
+    -- author. The error text is an argument and never part of the format
+    -- string -- a percent sign in server text is one of the things that gets
+    -- us here.
+    pcall(function ()
+        printf('Render error, window disabled: %s -- /incursion to try again.',
+               tostring(err));
+    end);
 end);
 
 --[[
