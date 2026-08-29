@@ -13,6 +13,7 @@ method: >
   re-derived with verifier-authored probes driving the shipped handlers, not by
   re-reading the harness's own checks.
 findings:
+
   - id: WARN-01
     severity: warning
     title: "Criterion 2's 'zero strip_colors' holds for colour-free lines only"
@@ -27,6 +28,7 @@ findings:
     decision_requested: >
       Accept the narrowing (an override entry), or restate the criterion as
       "zero for a colour-free line; strictly cheaper for a coloured one".
+
   - id: WARN-02
     severity: warning
     title: "CHANGELOG 1.2.0 says a line the addon ignores 'costs nothing'"
@@ -40,6 +42,7 @@ findings:
     decision_requested: >
       Reword to what is measured (e.g. "is turned away before anything is built
       for it"), or accept the shorthand.
+
   - id: INFO-01
     severity: info
     title: "coloured() in run_tests.py is the last surviving copy of the corrected premise"
@@ -47,6 +50,7 @@ findings:
       Zero call sites (verified by grep), so it cannot cause the defect. Its
       body and docstring still encode the two-marker premise CR-01 corrected
       (`"\x1e" in line or "\x1f" in line`). Matches the IN-01 disposition.
+
   - id: INFO-02
     severity: info
     title: "ui.lua:12-13 claims no content name appears in the file, directly above six"
@@ -56,6 +60,7 @@ findings:
       not touch the sentence or the mockup. Read as "no content name is
       hardcoded in the drawing logic" the sentence is true; read literally it is
       not. Not a Phase 4 regression.
+
   - id: INFO-03
     severity: info
     title: "reset() and the /incursion lock|auto paths call settings.save() unprotected"
@@ -66,18 +71,22 @@ findings:
       phase; outside CR-02's scope, which was persist() inside d3d_present.
       Same class as CR-02 pointed at the command path rather than the frame.
 human_verification:
+
   - test: "In game: /addon reload inctrack mid-run, then wait for the next 'You have N minutes remaining' line."
     expected: "The instance clock agrees with the server's line rather than being optimistic by the downtime."
     why_human: "Carried forward from Phase 2. Requires a live server sending the time line across a real unload."
     origin: "Phase 2 (FIX-02)"
+
   - test: "In game: confirm the window draws with no title bar and no close control, and that /incursion dismisses it."
     expected: "No close affordance is present; /incursion is the dismiss."
     why_human: "Carried forward from Phase 2. Visual appearance on a real ImGui host."
     origin: "Phase 2 (FIX-03)"
+
   - test: "In game: force a render error and confirm the ImGui stack repair does not raise a second time (the D8 imgui.End metatable lookup)."
     expected: "The window disables itself, says so once, and the frame completes."
     why_human: "Carried forward from Phase 3. The stub cannot reproduce Ashita's imgui metatable lookup semantics."
     origin: "Phase 3 (HARD-01, D8)"
+
   - test: "In game: confirm a real coloured Incursion line still starts a run -- e.g. that the 'Begins!' line reaches the window when the client has colour codes in it."
     expected: "The run starts. The gate declined to judge the coloured line, strip_colors removed all three marker bytes, and parse matched."
     why_human: >
@@ -91,6 +100,10 @@ human_verification:
       against observed traffic. This is the silent-permanent-false-negative
       class defect CR-01 fixed; a regression here is invisible in chat.
     origin: "Phase 4 (CR-01)"
+audit_acknowledged:
+  milestone: v1.2.0
+  at: 2026-08-29
+  status: human_needed
 ---
 
 # Phase 4: Cost and Record — Verification Report
@@ -201,12 +214,14 @@ hidden or latched-off window still writes the run down.
    not a target. Observed 3.53x (Lua 5.5) and 4.81x (LuaJIT), far above it. That
    the ratio differs by backend while the *counters* are identical is itself
    evidence the counters, not the clock, carry the weight.
+
 2. **The revision downward is real and self-documenting.** `REJECT_BASELINE`'s
    comment records the superseded 285,562 / 3.502 figure, states that it was
    measured against a stub doing two gsubs where the host does one, and says
    plainly *"Honest and smaller beats flattering."* `commit: a6a3577` exists and
    is correctly described as naming where the old shape was transcribed from
    rather than when the figure was taken.
+
 3. **The corpus cannot flatter the result.** The suite's first check asserts no
    corpus line actually parses, so the two shapes are never comparing a path
    that skipped real work with one that did it.

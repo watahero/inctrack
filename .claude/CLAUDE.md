@@ -7,26 +7,73 @@
 inctrack is a live HUD for **CatsEyeXI** Incursions — an Ashita v4 addon (Lua +
 ImGui) that shows the current instance, phase and kill progress, the mobs that
 count, the boss waiting at the end of the phase, the bonus objective and its
-countdown, time left, phases cleared, and the boons picked — all read from the
-server's own chat messages. No packet inspection, no memory reading.
+countdown, time left, phases cleared, and the boons picked. Everything it
+displays is read from the server's own chat messages: no packet inspection, and
+no memory reading for run data. The single memory read in the addon is
+`GetParty():GetMemberName(0)` — the player's own character name, used only to
+tell "you gained a boon" from another player's line.
 
-It shipped at **v1.1.0** and is in daily use by its author on CatsEyeXI. This
-milestone is not new features. It is a **quality pass on shipped code**: close
-the automated-test gaps, fix the defects a codebase audit confirmed, harden the
-fragile paths, and cut the cost paid on every chat line.
+It ships at **v1.2.0** and is in daily use by its author on CatsEyeXI. v1.2.0
+added nothing to the window. It was a quality pass on shipped code: the two
+files the suite had never reached are now covered, three defects visible in the
+code are gone, six fragile paths were hardened, the cost paid on every chat line
+was cut and measured, and the project's own documents were brought back into
+agreement with what ships.
+
+**What comes next is not chosen.** The candidates are in Active below and they
+are all things this milestone deliberately set aside: the process tooling that
+was deferred while there was too little coverage to be worth running, a short
+list of residuals that were named rather than fixed, and four checks that only a
+live Incursion can close. No feature milestone has been proposed.
 
 **Core Value:** **What the window shows is either true, or visibly marked as unconfirmed —
 never quietly wrong.** A HUD that lies is worse than no HUD, because the player
 stops reading chat and trusts it.
 
+**Shipping v1.2.0 did not change this, and that is a decision, not an
+oversight.** It is still the right priority, and this milestone is the strongest
+evidence for it so far — because the value earned its keep against the
+milestone's own work rather than against the server.
+
+Of the five Critical findings raised across the four phase reviews, four were
+regressions this milestone's own hardening introduced, and three of them were
+exactly the class the core value exists to catch:
+
+- **Phase 2 CR-01.** FIX-03's fix shipped `imgui.Begin(name, flags)`. Ashita's
+  SDK declares one positional signature and slot 2 is `p_open`; a survey of 220
+  `imgui.Begin(` call sites across the install found inctrack was the only addon
+  passing flags there. The window could have silently lost `AlwaysAutoResize`,
+  `NoTitleBar` and `NoMove` — a window that looks fine and is not.
+
+- **Phase 3 CR-01.** HARD-05's new validator required non-empty strings, and the
+  addon's own parser emits a blank `next_boss.name` from a line the server
+  really sends. The validator was rejecting sessions the addon itself had
+  written, turning one such line into total loss of the run's boons, points,
+  phase and elapsed on the next reload.
+
+- **Phase 4 CR-01.** PERF-01's cheap gate covered two of Ashita's three colour
+  marker bytes. A marker landing inside one of the seven needles would have made
+  the addon reject a real Incursion line before it was ever uncoloured — the
+  window simply never appears, and a dropped line looks exactly like a quiet
+  stretch of chat.
+
+Each was found by asking the core value's question of a change made in its name.
+None of the three was visible in a green suite until someone went looking.
+
+The fourth, Phase 4 CR-02, is the same origin and a different class: PERF-02's
+move of `persist()` onto the frame handler left it unprotected on the thread
+every addon in the process shares. Phase 1's CR-01 was a harness defect, not
+shipped behaviour.
+
 ### Constraints
 
-- **Tech stack**: Lua 5.1 as embedded by Ashita v4, plus ImGui bindings — the host decides, not us
+- **Tech stack**: LuaJIT 2.1 as embedded by Ashita v4 — Lua 5.1 semantics plus LuaJIT extensions — with ImGui bindings. The host decides, not us; the harness is exercised across all seven Lua backends `lupa` ships precisely so nothing depends on which one a contributor happens to have
+- **The ImGui binding is uninspectable**: `addons/libs/imgui.lua` defines no Lua-side functions at all — it is a constants table whose `__index` is `AshitaCore:GetGuiManager()`, so every call reaches a compiled binding that ships without source. Call shapes are settled by the SDK header and by what the other 220 call sites in the install do, and only a rendered frame proves them
 - **Build**: none, and none wanted — edit the `.lua` files and copy the folder across; install is a folder copy
 - **Purity boundary**: `parser.lua` and `state.lua` must stay free of any Ashita dependency — it is the only reason they can be tested outside the game, and breaking it silently removes the entire test suite's reach
-- **Zero content knowledge**: no instance, boss, mob, objective or difficulty name may appear in any Lua file — the addon must survive the server adding content without a code change
+- **Zero content knowledge**: no instance, boss, mob, objective or difficulty name may appear in any **code path** — nothing the addon reads, matches on or draws from is a content name, so the addon survives the server adding content without a code change. Comments and layout sketches may name real content illustratively; nothing reads from them
 - **Runtime budget**: the `text_in` handler runs on **every** chat line the client receives; cost there is paid during combat, in crowded zones, forever
-- **Rendering**: `ui.render` runs inside `d3d_present`, once per frame — an unhandled error there is a frame-rate or stack problem, not a log line
+- **Rendering**: `ui.render` runs inside `d3d_present`, once per frame, on the thread every addon in the process shares — an unhandled error there is a frame-rate or stack problem, not a log line
 - **Verification data is private**: the deepest suites replay the author's own chatlogs, which are not in the repo; anyone else's run of the suite covers less
 - **Compatibility**: the server's chat wording is the API, and it can change without notice or versioning
 

@@ -16,6 +16,7 @@ deferred: []
 behavior_unverified_items: []
 coincidental_reliance_items: []
 human_verification:
+
   - test: "In game, with the live install at ...\\Ashita\\addons\\inctrack\\, force a
       render error (e.g. /addon reload after hand-editing the settings session blob
       to put a boolean in objective.mobs) and watch the window and the rest of the
@@ -31,6 +32,7 @@ human_verification:
       stub by construction. ROADMAP criterion 1 is deliberately written against the
       stub, so this is prudence beyond the contract, not a criterion gap. Carried
       alongside the two in-game checks still open from Phase 2."
+
   - test: "Decide whether 03-02-SUMMARY.md and 03-03-SUMMARY.md should be amended with a
       post-review note, or left as the pre-review record with 03-REVIEW.md as the
       correction."
@@ -43,6 +45,10 @@ human_verification:
       W-01 below); both were reversed by review findings WR-04 and CR-01 whose reasoning
       is recorded in 03-REVIEW.md and in the code's own comments. Phase 4 carries DOC-01
       and DOC-02 and will read these files."
+audit_acknowledged:
+  milestone: v1.2.0
+  at: 2026-08-29
+  status: human_needed
 ---
 
 # Phase 3: Fragile Paths Verification Report
@@ -59,8 +65,10 @@ SUMMARY.md claims were not taken as evidence. Every verdict below rests on one o
 
 - a run of `test/run_tests.py` against the author's 127 logs, performed by this
   verifier, on both backends;
+
 - a **mutation** performed in a throwaway `git clone --local` at
   `…\scratchpad\mut`, confirming the suite turns red when the fix is reverted;
+
 - a direct probe driving real server text through parser → state → serialise →
   restore → `ui.render` against the ImGui recorder, reading what is actually drawn.
 
@@ -262,6 +270,7 @@ answers "what shape is this", never "is this informative"*.
   on reload because one server line named no boss". One degenerate line converting
   every later reload into total loss of a live run is strictly worse than the
   fragility HARD-05 was written to close.
+
 - **The asymmetry argument holds.** The boon matcher is the only one in the file
   with no `Incursion [` / `New Objective:` / `(Boss:` anchor, so a blank name there
   is evidence the match is not a boon at all — a *disambiguator*. The boss forms

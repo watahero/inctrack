@@ -2,20 +2,20 @@
 gsd_state_version: 1.0
 milestone: v1.2.0
 milestone_name: correctness and cost
-current_phase: 4
-current_phase_name: Cost and Record
-status: milestone-complete (four in-game checks open)
+status: Awaiting next milestone
 stopped_at: Completed 04-03-PLAN.md -- Phase 4 and milestone v1.2.0 complete
-last_updated: "2026-08-29T09:13:52.656Z"
+last_updated: "2026-08-29T18:08:39.725Z"
 last_activity: 2026-08-29
-last_activity_desc: "04-03 complete (DOC-01, DOC-02): ships as 1.2.0 with a CHANGELOG entry in the terms the Phase-1 expected failures used and a harness pin holding the two together (negative control both ways); docs/design.md rewritten from the source over all 25 ledger rows, with new sections on persistence and schema version 2, the restore validator, render containment, cost and what the player is told, and neither superseded claim reaching it; ui.lua's layout comment names all nine rows; README corpus figures re-derived (127 logs, 130 days, 2,951,129 lines, 111 runs). addon 189 -> 190, every other suite flat, parser exactly 11819 and generic exactly 1, zero known defects on both backends. Redeployed: 3 pre-copy DRIFTED + state.lua same (unchanged since Phase 3), then same x4 and the install reporting 1.2.0. Phase 4 and milestone v1.2.0 complete"
-state_head: af2c6f17f9f929dbc986d71e6af9195c1d239279
+last_activity_desc: Milestone v1.2.0 completed and archived
+state_head: 38b18667fd7bd8bb97d46c9f82393736c933e3b2
 progress:
   total_phases: 4
-  completed_phases: 4
+  completed_phases: 0
   total_plans: 11
   completed_plans: 11
-  percent: 100
+  percent: 0
+current_phase: 4
+current_phase_name: Cost and Record
 ---
 
 # Project State
@@ -29,12 +29,10 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 
 ## Current Position
 
-Phase: 4 of 4 (Cost and Record)
-Plan: 3 of 3 in current phase
-Status: Phase 4 complete — 04-01 (PERF-01/04), 04-02 (PERF-02/03) and 04-03 (DOC-01/02) all done. Milestone v1.2.0 is closed; /gsd-audit-milestone is next
-Last activity: 2026-08-29 — 04-03 complete (DOC-01, DOC-02): ships as 1.2.0 with a CHANGELOG entry in the terms the Phase-1 expected failures used and a harness pin holding the two together (negative control both ways); docs/design.md rewritten from the source over all 25 ledger rows, with new sections on persistence and schema version 2, the restore validator, render containment, cost and what the player is told, and neither superseded claim reaching it; ui.lua's layout comment names all nine rows; README corpus figures re-derived (127 logs, 130 days, 2,951,129 lines, 111 runs). addon 189 -> 190, every other suite flat, parser exactly 11819 and generic exactly 1, zero known defects on both backends. Redeployed: 3 pre-copy DRIFTED + state.lua same (unchanged since Phase 3), then same x4 and the install reporting 1.2.0. Phase 4 and milestone v1.2.0 complete
-
-Progress: [██████████] 100% of phase 4 (3 of 3 plans)
+Phase: Milestone v1.2.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-08-29 — Milestone v1.2.0 completed and archived
 
 ## Performance Metrics
 
@@ -203,3 +201,7 @@ to Phases 3-4 rather than pause; neither blocks that work.
   through a metatable `__index`. The stub models that shape but cannot execute
   it. Criterion 1 is written against the stub, so this is beyond the contract —
   it would be closed by the same in-game session as the Phase 2 items.
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone

@@ -12,6 +12,7 @@ re_verification:
   gaps_remaining: []
   regressions: []
 behavior_unverified_items:
+
   - truth: "In game: `/addon reload inctrack` mid-run leaves the instance clock agreeing with the server's next `You have N minutes remaining` line, instead of being optimistic by the downtime."
     test: >-
       In an Incursion on CatsEyeXI with the deployed build loaded: (1) note the
@@ -34,6 +35,7 @@ behavior_unverified_items:
       monotonic os.clock. The suite can only simulate the gap by rewriting
       saved_at, which is exactly the term under test.
 human_verification:
+
   - test: >-
       In an Incursion on CatsEyeXI with the deployed build loaded: (1) note the
       instance clock the window shows and the wall-clock time; (2) run
@@ -49,6 +51,7 @@ human_verification:
     why_human: >-
       ROADMAP success criterion 4. Needs a human inside a live Incursion; the
       suite can only simulate the gap by rewriting the very field under test.
+
   - test: >-
       Same session, immediately after the reload above: look at the window and
       try to interact with its frame. (1) Is there a title bar or a close [x]?
@@ -73,6 +76,10 @@ human_verification:
       the only proof the flags actually land is a rendered window. The suite
       pins the call's argument positions against a stub, which is a claim about
       the host rather than a fact derived from it.
+audit_acknowledged:
+  milestone: v1.2.0
+  at: 2026-08-29
+  status: human_needed
 ---
 
 # Phase 2: The Three Defects — Verification Report
