@@ -135,11 +135,48 @@ end
 * Persist the current run so a reload, crash, or zone-out mid-Incursion does
 * not lose it. The server never re-announces the objective on recovery, so
 * without this the window would come back blank for the rest of the phase.
+*
+* Three outcomes, and each of them is a different thing to write down:
+*
+*   * There is no run. The empty string is the right answer and the only
+*     thing that may produce it -- an empty session means 'nothing to
+*     resume', so a cleared or finished run has to say so or it comes back
+*     from the dead on the next load.
+*   * There is a run and it encoded. Write it.
+*   * There is a run and the encode raised. Write *nothing*, and let the
+*     raise out to the caller.
+*
+* That last one used to be folded into the first by a single ternary, and it
+* is the one case where they are opposites: an unencodable run is not an
+* absent one, and storing '' for it wrote an empty session over a perfectly
+* good previously-saved run and said nothing. Silent and destructive on the
+* one path whose whole purpose is not losing the run -- while the disk fault
+* two lines further on latches, retries and reports.
+*
+* So the failure is raised rather than swallowed, because every caller
+* already contains the disk write's raise and treats it the same way: the
+* frame handler re-arms what it owes behind the retry window and says so
+* once, and reset() and the load handler do likewise. From the player's side
+* the two faults are the same event -- the run could not be written down --
+* and there is nothing useful they could do differently about either.
 ]]--
 local function persist()
     local blob = incursion.state:serialise();
+    if blob == nil then
+        incursion.settings.session = '';
+        settings.save();
+        return;
+    end
+
     local ok, encoded = pcall(json.encode, blob);
-    incursion.settings.session = (ok and blob ~= nil) and encoded or '';
+    if not ok then
+        -- Re-raised at level 0 and with the encoder's own error value, so
+        -- what reaches the player is what the host said rather than a line
+        -- number in this file.
+        error(encoded, 0);
+    end
+
+    incursion.settings.session = encoded;
     settings.save();
 end
 

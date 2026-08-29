@@ -179,7 +179,7 @@ shipped behaviour.
 - The handler is **read-only** — `e.message` is never modified, `e.blocked` is never set. The comment says so; keep it true.
 - A parse failure must never propagate. Any new work triggered by a chat line goes *inside* the pcall.
 - The failure path only prints; it never resets state or disables the addon.
-- `local ok, encoded = pcall(json.encode, blob)` in `persist()`; on failure the session is stored as `''` rather than half-written.
+- `local ok, encoded = pcall(json.encode, blob)` in `persist()`; on failure nothing is stored and nothing is written -- the raise goes to the caller, which keeps what it owes and retries. `''` is written only when there is no run at all.
 - `local ok, blob = pcall(json.decode, saved)` on load and on profile switch; a corrupt blob is discarded and the setting cleared, never half-applied.
 - `parser.parse` returns `nil` for non-strings, empty lines, and anything failing the cheap prefix rejection.
 - `State:apply` returns `false` for `type(e) ~= 'table' or not e.t`, and for events with no run to attach to.
@@ -330,7 +330,7 @@ shipped behaviour.
 ## Error Handling
 
 - The whole `text_in` body runs inside a `pcall`; a failure prints `parse error: …` and the message passes through untouched (`inctrack/inctrack.lua:149-191`).
-- `json.encode` / `json.decode` are both `pcall`-wrapped; a failed encode writes an empty session rather than a partial blob.
+- `json.encode` / `json.decode` are both `pcall`-wrapped; a failed encode writes nothing at all and raises to the caller, leaving the last good save where it is.
 - An unparseable line simply returns `nil`. A malformed, stale, or finished persisted run is discarded whole, never half-applied.
 - `State:apply` returns `false` for a non-table or `t`-less argument.
 

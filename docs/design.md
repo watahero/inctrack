@@ -629,9 +629,14 @@ them:
    with `/incursion reset` as the stated way back. Same shape as the two
    latches above; the error text is an argument there too.
 4. **The settings round trip.** `json.encode` and `json.decode` are both
-   `pcall`-wrapped. A failed encode writes an empty session rather than a partial
-   blob; a blob that cannot be decoded is discarded and the stored string
-   cleared, so an unusable one is not retried on every load forever.
+   `pcall`-wrapped. A failed encode writes **nothing** — not the partial blob,
+   and not the empty string either, because an empty session means "no run to
+   resume" and writing one over a good save is how a run that could not be
+   encoded became a run that no longer exists. The failure is raised to the
+   caller instead, where it is treated exactly as a refused disk write is: what
+   is owed is kept, retried behind the five-second window, and reported once. A
+   blob that cannot be *decoded* is discarded and the stored string cleared, so
+   an unusable one is not retried on every load forever.
 5. **The structural validator**, which keeps a wrong-shaped blob out of the run
    record entirely. It and the render containment are not redundant: the first
    covers what the second cannot see, which is anything the *live* event stream
