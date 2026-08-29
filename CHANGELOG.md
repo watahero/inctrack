@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.2.1 — 2026-08-29
+
+Three fixes on the path that writes your run to disk. Two of them could lose a
+run in progress without saying anything.
+
+- If the addon could not turn the run into text to save it, it wrote an empty
+  run over the one already on disk and said nothing about it. A reload mid-run
+  then came back blank, and `/incursion reset` — the thing you would reach for
+  — made no difference. The saved run is now left exactly where it is, the
+  addon says what happened, and it tries again shortly.
+- `/incursion reset` could hand the run back. If writing the cleared run down
+  was refused — a read-only settings file, or something else holding it open —
+  you got an error instead of `Run cleared.`, the run stayed on disk, and the
+  next time you loaded the addon it resumed the run you had just thrown away.
+  The clear is now retried on the next frame, and the failure is reported.
+- Loading and unloading the addon could each throw an error out into Ashita if
+  the settings file refused the write. Both are now contained. The unload one
+  is the write that cannot wait for another frame, so there is nothing to retry
+  it on: what it can do, and now does, is say that anything since the last
+  write is lost rather than disappearing quietly.
+- Internal: a field in the run state machine that nothing read has been
+  removed. Nothing the window shows changes.
+
 ## 1.2.0 — 2026-08-29
 
 No new features. Everything the window shows works the way it always claimed

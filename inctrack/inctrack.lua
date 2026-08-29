@@ -19,7 +19,7 @@
 
 addon.name    = 'inctrack';
 addon.author  = 'Godwen';
-addon.version = '1.2.0';
+addon.version = '1.2.1';
 addon.link    = 'https://github.com/watahero/inctrack';
 addon.desc    = 'Live Incursion objective, progress and timers. Independent project, not affiliated with other Incursion addons.';
 
