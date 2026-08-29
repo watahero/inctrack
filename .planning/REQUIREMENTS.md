@@ -40,8 +40,8 @@ Paths that are fragile but have not yet been observed to fail.
 - [x] **HARD-02**: a boss objective naming a mob whose own name contains " at " is parsed correctly rather than split at the first occurrence
 - [x] **HARD-03**: a mob list containing a name with a comma in it is not split into two mobs
 - [x] **HARD-04**: the boon matcher cannot claim an ordinary buff line — it matches only the `(<glyph>): <stats>` form
-- [ ] **HARD-05**: a restored session is validated structurally before it is applied, and a malformed one is discarded rather than half-applied
-- [ ] **HARD-06**: `reset()` clears `pending_time`, so a held timer sync cannot leak into an unrelated later run
+- [x] **HARD-05**: a restored session is validated structurally before it is applied, and a malformed one is discarded rather than half-applied
+- [x] **HARD-06**: `reset()` clears `pending_time`, so a held timer sync cannot leak into an unrelated later run
 
 ### Performance
 
@@ -95,8 +95,8 @@ Populated during roadmap creation (2026-08-29). See `.planning/ROADMAP.md` for p
 | HARD-02 | Phase 3 | Complete |
 | HARD-03 | Phase 3 | Complete |
 | HARD-04 | Phase 3 | Complete |
-| HARD-05 | Phase 3 | Pending |
-| HARD-06 | Phase 3 | Pending |
+| HARD-05 | Phase 3 | Complete |
+| HARD-06 | Phase 3 | Complete |
 | PERF-01 | Phase 4 | Pending |
 | PERF-02 | Phase 4 | Pending |
 | PERF-03 | Phase 4 | Pending |

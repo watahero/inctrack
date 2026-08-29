@@ -121,7 +121,7 @@ That re-derivation is part of this phase, not a regression.
   4. A structurally malformed saved session — a string where `kills_max` belongs, a number inside `objective.mobs` — is discarded whole: `restore()` returns falsy and leaves no run behind, so nothing of that shape ever reaches arithmetic in `ui.lua`.
   5. `/incursion reset` within 30 seconds of a `You have N minutes remaining` line does not seed the next run's clock — `pending_time` is nil after `reset()`.
 
-**Plans**: 2/3 plans executed
+**Plans**: 3/3 plans executed
 
 Plans:
 
@@ -137,7 +137,7 @@ Plans:
   pattern, each accepted on a recorded 127-log survey, and all guarded by a new
   corpus-wide over-reach check
 
-- [ ] 03-03-PLAN.md — HARD-05/06: a structural validator that discards a
+- [x] 03-03-PLAN.md — HARD-05/06: a structural validator that discards a
   malformed session whole rather than half-applying it, the objective and boss
   preview copied instead of adopted by reference, `reset()` clearing
   `pending_time`, and the phase-closing run plus the `right_text` decision
@@ -206,7 +206,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. The Net | 3/3 | ✓ Complete | 2026-08-29 |
 | 2. The Three Defects | 2/2 | ✓ Implemented (in-game checks deferred) | 2026-08-29 |
-| 3. Fragile Paths | 2/3 | In Progress|  |
+| 3. Fragile Paths | 3/3 | In Progress|  |
 | 4. Cost and Record | 0/TBD | Not started | - |
 
 ---

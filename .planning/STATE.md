@@ -5,16 +5,16 @@ milestone_name: correctness and cost
 current_phase: 3
 current_phase_name: Fragile Paths
 status: executing
-stopped_at: Completed 03-02-PLAN.md -- HARD-02/03/04 closed, 13,059 checks over 127 logs, parser still exactly 11819 and generic exactly 1
-last_updated: "2026-08-29T05:30:55.497Z"
+stopped_at: "Completed 03-03-PLAN.md -- Phase 3 closed: all six HARD requirements, 13,168 checks over 127 logs on both backends, parser still exactly 11819 and generic exactly 1"
+last_updated: "2026-08-29T05:51:29.740Z"
 last_activity: 2026-08-29
 last_activity_desc: "03-02 complete: HARD-02/03/04 tightened in parser.lua on a recorded 127-log survey with all eight invariants zero; parser held at exactly 11819 and generic at exactly 1"
-state_head: 2f8206c52ffd4eaa8864f78317ad284265cc3dd9
+state_head: 10d679e76f3c3717581ab43e68a116f62bf3c915
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 8
-  completed_plans: 7
+  completed_plans: 8
   percent: 25
 ---
 
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-08-28)
 ## Current Position
 
 Phase: 3 of 4 (Fragile Paths)
-Plan: 2 of 3 in current phase
+Plan: 3 of 3 in current phase
 Status: 03-02 complete (HARD-02/03/04) — 03-03 (HARD-05/06) is next
 Last activity: 2026-08-29 — 03-02 complete: the boss split anchors on the last ' at ' before the coordinate group (1.1.0 shape kept as a fallback), the mob list splits on comma-space and the boon tail requires a non-empty glyph and a non-blank name (neither with a fallback); survey of 127 logs recorded with 8/8 invariants zero; adaptability 20 → 41 plus a new corpus over-reach guard; four negative controls, two of them recorded as limits
 
-Progress: [██████░░░░] 67% of phase 3 (2 of 3 plans)
+Progress: [███░░░░░░░] 25% of phase 3 (2 of 3 plans)
 
 ## Performance Metrics
 
@@ -67,6 +67,7 @@ Progress: [██████░░░░] 67% of phase 3 (2 of 3 plans)
 | Phase 02 P02 | 22min | 3 tasks | 3 files |
 | Phase 03 P01 | 29min | 3 tasks | 3 files |
 | Phase 3 P02 | 1h | 3 tasks | 2 files |
+| Phase 03 P03 | 16min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -105,6 +106,12 @@ Recent decisions affecting current work:
 - [Phase 3]: HARD-02: the location is the anchor, not the name -- a parenthesised trailing group is structurally identifiable and the name is whatever precedes it, so no list of names is needed
 - [Phase 3]: HARD-02 keeps the 1.1.0 shape as a fallback at all three call sites; HARD-03 and HARD-04 keep none and rest on the survey plus the exact-11819 and exact-1 pins
 - [Phase 3]: Families 2 and 3 of the corpus over-reach guard cannot bite on today's corpus and are recorded as guarding future lines, not present ones
+- [Phase 3]: HARD-05: a file-local structural validator runs after the version gate and before any field is read for its value; it rejects rather than coerces and discards a malformed session whole rather than half-applying it
+- [Phase 3]: The validator checks shapes only -- objective.kind must be a string but is never matched against a list of known kinds, so a kind the server adds later survives
+- [Phase 3]: array_key tests k >= 1 and k % 1 == 0 rather than an integer subtype, because a JSON-decoded number is a float and a tonumber-derived one may be an integer; the luajit21 run proves it
+- [Phase 3]: restore() rebuilds objective and next_boss field by field instead of adopting them by reference, closing review finding IN-01 rather than narrowing it
+- [Phase 3]: HARD-06: reset() clears pending_time; the thirty-second staleness guard at begin is untouched because it answers a different question, and a counter-pin keeps the hold the bridge exists for
+- [Phase 3]: The right_text right-alignment finding is accepted as intended behaviour -- pinned by two existing suite locations, not deferred to Phase 4, and not counted as a seventh fragility
 
 ### Pending Todos
 
@@ -128,8 +135,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-08-29T05:30:55.293Z
-Stopped at: Completed 03-02-PLAN.md -- HARD-02/03/04 closed, 13,059 checks over 127 logs, parser still exactly 11819 and generic exactly 1
+Last session: 2026-08-29T05:51:29.533Z
+Stopped at: Completed 03-03-PLAN.md -- Phase 3 closed: all six HARD requirements, 13,168 checks over 127 logs on both backends, parser still exactly 11819 and generic exactly 1
 Resume file: None
 
 ## Deferred Verification
