@@ -33,7 +33,7 @@ Shipped in 1.0.0–1.1.0 and confirmed working against 126 real chatlogs
 - ✓ Instance time remaining, seeded from the server's whole-minute sync and ticked locally — existing
 - ✓ Phases cleared and elapsed run time — existing
 - ✓ Boons picked between phases, with stats in FFXI shorthand — existing
-- ✓ Zero hardcoded content: no instance, boss, mob, objective or difficulty name anywhere in the Lua — existing
+- ✓ Zero hardcoded content: no instance, boss, mob, objective or difficulty name appears in any code path — nothing read, matched on or drawn is a content name, so new server content works with no code change. Pattern-example comments and `ui.lua`'s layout sketch do name real content illustratively; nothing reads from them — existing
 - ✓ Generic parser tier so unrecognised future messages still reach the window instead of being dropped — existing
 - ✓ Run state persists across reload, zoning and crash; post-reconnect state treated as a lower bound and marked as such — existing
 - ✓ `/incursion` (`/inc`) with `reset`, `lock`, `auto` subcommands; automatic show/hide around a run — existing

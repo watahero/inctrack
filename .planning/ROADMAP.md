@@ -36,7 +36,13 @@ Every phase must leave these true, and each phase's verification restates them:
 - The purity boundary holds: `parser.lua` and `state.lua` gain no Ashita
   dependency. Stubs live in the harness, never in the addon.
 
-- No instance, boss, mob, objective or difficulty name appears in any Lua file.
+- No instance, boss, mob, objective or difficulty name appears in any **code
+  path**: nothing the addon reads, matches on or draws from is a content name,
+  so new server content works with zero code change. Comments and layout
+  sketches do name real content illustratively — `parser.lua`'s nine pattern
+  examples, one difficulty tier in a `state.lua` example line, and `ui.lua`'s
+  layout mockup — and nothing reads from them. That is the guarantee, and it
+  is the form `ui.lua`'s own header now states.
 
 ## Phases
 
