@@ -2304,6 +2304,17 @@ SHELL_OTHER = "Hivewarden Vaults"
 SHELL_BOON = ("%s gains the effect of Warden's Vigil (X): "
               "WS Accuracy+15 / Store TP+8" % PLAYER)
 
+# An instance name holding a percent sign. Server text is quoted through to
+# the window verbatim, so a name like this reaches a draw call unescaped --
+# the second of the two triggers the phase brief names.
+SHELL_PERCENT = "Vault of 100% Ruin"
+
+# A kill objective, so a mob list exists to poison. Invented names in the
+# server's established wording, as everything else in this suite is.
+SHELL_MOBS = ("New Objective: Defeat 12 enemies "
+              "(Nest Skitterer, Nest Broodguard, Nest Drone)")
+SHELL_FIRST_MOB = "Nest Skitterer"
+
 
 def begins(instance=SHELL_INSTANCE):
     return "Incursion [%s] Begins! (Normal)" % instance
@@ -2757,6 +2768,210 @@ def test_addon_shell():
     # the manual-hide branch at inctrack.lua:219-222: that is the ui suite's
     # one expected failure, and a second entry for the same defect would break
     # the exactly-three guard in main().
+
+    # --- an error inside ui.render (HARD-01) --------------------------------
+    #
+    # ui.render runs inside d3d_present, on the game thread, sixty times a
+    # second, and it is handed strings that came off the wire and tables that
+    # came out of a JSON blob. An error there is not a log line: it leaves the
+    # ImGui window and style stacks unbalanced for every addon sharing the
+    # process, and then it happens again on the next frame, and the one after.
+
+    BALANCED = {"window": 0, "style_var": 0, "style_color": 0}
+
+    def one_frame(host):
+        """Drive a single d3d_present.
+
+        Returns the error text if it escaped into the host, or None when the
+        frame handler contained it. A raise that reaches here is a raise that
+        would reach Ashita.
+        """
+        try:
+            host.fire("d3d_present")
+        except Exception as exc:                          # noqa: BLE001
+            return str(exc).splitlines()[0]
+        return None
+
+    def drawn_names(host):
+        return [name for name, _ in host.imgui.calls]
+
+    res.check(frame.addon["incursion"]["render_off"] is False,
+              "an ordinary frame took the window off screen for the rest of "
+              "the session by itself")
+
+    # Trigger A: a value table.concat refuses, reached through the mob list.
+    # A boolean and not a number -- table.concat takes numbers happily, so a
+    # number would prove nothing.
+    concat = loaded_host()
+    concat.fire_text_in(begins())
+    concat.fire_text_in(phase_line(1, 3))
+    concat.fire_text_in(SHELL_MOBS)
+
+    # One clean frame first. That is realistic -- a run draws for a while and
+    # then a bad value arrives -- and it is what earns the repair: the render
+    # shape has been shown to work on this host, so what raises afterwards is
+    # inside the window.
+    concat.imgui.reset()
+    one_frame(concat)
+    res.check("Begin" in drawn_names(concat),
+              "the window drew no clean frame before the run was poisoned, "
+              "so nothing below can tell a repair from a guess")
+
+    shell_run(concat)["objective"]["mobs"][1] = True
+    chat_before = len(concat.chat)
+    concat.imgui.reset()
+    escaped = one_frame(concat)
+    balance = concat.imgui.balance()
+
+    res.check(escaped is None,
+              "a bad value in the mob list threw out of d3d_present and into "
+              "the game thread every addon shares: %s" % escaped)
+    res.check(balance == BALANCED,
+              "the ImGui stacks were left unbalanced after a render error, "
+              "so this window and every other addon's is corrupt from the "
+              "next frame on: %r" % (balance,))
+    res.check("Begin" in drawn_names(concat),
+              "the failing frame never opened the window, so the balance "
+              "above is the balance of a frame that drew nothing")
+
+    said = concat.chat[chat_before:]
+    res.check(len(said) == 1,
+              "one render failure produced %d chat lines" % len(said))
+    res.check(any("/incursion" in line for line in said),
+              "the window vanished and nothing said how to get it back: %r"
+              % (said,))
+
+    # Not sixty times a second.
+    chat_before = len(concat.chat)
+    concat.imgui.reset()
+    for _ in range(60):
+        one_frame(concat)
+    res.check(not concat.imgui.calls,
+              "a window that took itself off screen kept drawing anyway: %r"
+              % (concat.imgui.calls[:4],))
+    res.check(len(concat.chat) == chat_before,
+              "the same failure was reported again on later frames -- at "
+              "frame rate that is a chat log the player cannot read")
+
+    # The addon is not dead, only the window.
+    concat.fire_text_in(phase_line(2, 7))
+    still = shell_run(concat)
+    res.check(still is not None and still["phase"] == 2,
+              "chat stopped driving the run once the window switched itself "
+              "off: the whole addon went down with the HUD")
+
+    # The way back.
+    shell_run(concat)["objective"]["mobs"][1] = SHELL_FIRST_MOB
+    concat.fire("command", command="/incursion")
+    chat_before = len(concat.chat)
+    concat.imgui.reset()
+    escaped = one_frame(concat)
+    res.check(escaped is None,
+              "the frame after /incursion threw: %s" % escaped)
+    res.check("Begin" in drawn_names(concat),
+              "/incursion did not bring the window back: the player's only "
+              "recovery short of /addon reload does nothing")
+    res.check(len(concat.chat) == chat_before,
+              "a recovered window complained again on the very frame it came "
+              "back")
+
+    # Trigger B: a percent sign in a server-supplied instance name, raising
+    # from the call that draws it. The recorder models the consequence on
+    # demand; it never claims Ashita's binding really treats drawn text as a
+    # format string.
+    pct = loaded_host()
+    pct.fire_text_in(begins(SHELL_PERCENT))
+    pct.fire_text_in(phase_line(1, 3, instance=SHELL_PERCENT))
+
+    pct.imgui.reset()
+    one_frame(pct)
+    res.check("Begin" in drawn_names(pct),
+              "the window drew no clean frame before the injector was armed, "
+              "so nothing below can tell a repair from a guess")
+
+    chat_before = len(pct.chat)
+    pct.imgui.reset()
+    pct.imgui.arm_fault("TextColored", contains=SHELL_PERCENT)
+    escaped = one_frame(pct)
+    balance = pct.imgui.balance()
+
+    res.check(escaped is None,
+              "a percent sign in a name the server sent threw out of "
+              "d3d_present: %s" % escaped)
+    res.check(balance == BALANCED,
+              "the ImGui stacks were left unbalanced after a raise from a "
+              "draw call: %r" % (balance,))
+    res.check("Begin" in drawn_names(pct),
+              "the failing frame never opened the window, so the balance "
+              "above is the balance of a frame that drew nothing")
+
+    said = pct.chat[chat_before:]
+    res.check(len(said) == 1 and "/incursion" in said[0],
+              "the player was not told once, in one line naming /incursion, "
+              "what happened: %r" % (said,))
+
+    # Trigger C: a raise that precedes the window's opening. Three statements
+    # in render run before Begin, and a raise from any of them leaves nothing
+    # open and nothing pushed. Closing a window that was never opened is an
+    # unmatched close -- on a real host an ImGui assert, which would make the
+    # repair the second error of the frame. So the right repair here is no
+    # repair, and this is the case that forbids an unconditional one.
+    early = loaded_host()
+    early.fire_text_in(begins())
+    early.fire_text_in(phase_line(1, 3))
+
+    # Deliberately no clean frame: this host has never drawn.
+    chat_before = len(early.chat)
+    early.imgui.reset()
+    early.imgui.arm_fault("PushStyleVar")
+    escaped = one_frame(early)
+    balance = early.imgui.balance()
+    drawn = drawn_names(early)
+
+    res.check(escaped is None,
+              "a raise before the window opened threw out of d3d_present: %s"
+              % escaped)
+    res.check(balance == BALANCED,
+              "the stacks did not come back level from a frame that opened "
+              "nothing: %r" % (balance,))
+    res.check("End" not in drawn,
+              "the shell closed a window that was never opened -- on a real "
+              "host that is an ImGui assert, so the repair became the second "
+              "error of the frame: %r" % drawn)
+    res.check("PopStyleVar" not in drawn,
+              "the shell popped a style var that was never pushed: %r"
+              % drawn)
+    res.check(early.addon["incursion"]["render_off"] is True,
+              "a failure before the window opened was not latched, so it "
+              "will happen again on every frame from now on")
+
+    said = early.chat[chat_before:]
+    res.check(len(said) == 1 and "/incursion" in said[0],
+              "the player was not told once, in one line naming /incursion, "
+              "what happened: %r" % (said,))
+
+    early.fire("command", command="/incursion")
+    early.imgui.reset()
+    escaped = one_frame(early)
+    res.check(escaped is None and "Begin" in drawn_names(early),
+              "/incursion did not bring back a window disabled by a failure "
+              "that happened before it was ever opened")
+
+    # /incursion reset is the other way back, and it clears the run with it.
+    back = loaded_host()
+    back.fire_text_in(begins())
+    back.fire_text_in(phase_line(1, 3))
+    back.imgui.arm_fault("PushStyleVar")
+    one_frame(back)
+    res.check(back.addon["incursion"]["render_off"] is True,
+              "the failure was not latched, so it will repeat every frame")
+
+    back.fire("command", command="/incursion reset")
+    res.check(back.addon["incursion"]["render_off"] is False,
+              "/incursion reset left the window switched off, so a player "
+              "clearing the run still has no HUD")
+    res.check(shell_run(back) is None,
+              "/incursion reset kept the run it was asked to clear")
 
     return res
 
