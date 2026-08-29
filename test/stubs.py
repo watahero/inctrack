@@ -105,12 +105,85 @@ local S = {
     cursor  = PADDING,
     last_end = PADDING,
     armed   = false,
+    -- The armed one-shot fault, or nil when nothing is armed. See arm_fault
+    -- below; off by default, because a recorder that raises on its own would
+    -- change every window snapshot and every addon check.
+    fault   = nil,
 };
 __imgui_stub = S;
 
+--[[
+* The entry points that move an ImGui stack. For these the injected raise
+* happens *before* the call is logged and counted, unlike every other entry
+* point where it happens after: the log says what the stack did, not what was
+* attempted. A host that refuses a push has not pushed and a host that refuses
+* Begin has not opened a window, so logging the attempt would put a phantom
+* into balance()'s arithmetic and make the harness demand a repair no real
+* host is owed.
+]]--
+local STACK_MOVING = {
+    Begin        = true,
+    End          = true,
+    PushStyleVar = true,
+    PopStyleVar  = true,
+};
+
+--[[
+* Does the armed fault match this call? When a substring was supplied the
+* match is a plain-text find, never a pattern match -- the substrings the
+* tests use contain a percent sign.
+*
+* Returns matched, and the argument that triggered it when there was one.
+]]--
+local function fault_hit(name, ...)
+    local f = S.fault;
+    if f == nil or f.name ~= name then
+        return false, nil;
+    end
+    if f.contains == nil then
+        return true, nil;
+    end
+    for i = 1, select('#', ...) do
+        local a = select(i, ...);
+        if type(a) == 'string' and a:find(f.contains, 1, true) ~= nil then
+            return true, a;
+        end
+    end
+    return false, nil;
+end
+
+-- Disarm before raising, so one arming produces exactly one raise.
+local function fire_fault(name, ...)
+    local hit, trigger = fault_hit(name, ...);
+    if not hit then
+        return;
+    end
+    S.fault = nil;
+    if trigger ~= nil then
+        error('injected imgui fault: ' .. name .. ' refused ' ..
+              tostring(trigger), 0);
+    end
+    error('injected imgui fault: ' .. name .. ' refused', 0);
+end
+
 local function record(name, ...)
+    if STACK_MOVING[name] then
+        -- Raise first: a refused stack move did not happen, so it must not
+        -- appear in the log or the counts.
+        fire_fault(name, ...);
+        S.log[#S.log + 1] = { name = name, n = select('#', ...), args = { ... } };
+        S.counts[name] = (S.counts[name] or 0) + 1;
+        return;
+    end
+
+    -- Everywhere else the call really happened as far as the log is
+    -- concerned, and only then did the host refuse it -- which is what a
+    -- binding that rejects its argument does, and it keeps the balance
+    -- arithmetic honest: a TextColored that raised neither opened nor closed
+    -- anything.
     S.log[#S.log + 1] = { name = name, n = select('#', ...), args = { ... } };
     S.counts[name] = (S.counts[name] or 0) + 1;
+    fire_fault(name, ...);
 end
 
 --[[
@@ -266,10 +339,25 @@ function S.reset()
     S.cursor = PADDING;
     S.last_end = PADDING;
     S.armed = false;
+    S.fault = nil;
 end
 
 function S.arm()
     S.armed = true;
+end
+
+--[[
+* Arm a one-shot raise from a nominated entry point, optionally only when one
+* of the call's arguments is a string containing `contains` as a plain
+* literal. Nothing raises until this is called, and one arming produces
+* exactly one raise.
+*
+* This is a fault injector. It models the *consequence* -- a call that raises
+* inside render -- so the shell's containment can be tested at all. It is not
+* a claim about how Ashita's ImGui binding behaves.
+]]--
+function S.arm_fault(name, contains)
+    S.fault = { name = name, contains = contains };
 end
 
 S.api = imgui;
@@ -377,8 +465,9 @@ class ImGuiRecorder:
     """Python-side handle on the recording ImGui stub.
 
     calls          -- the raw log: a list of (name, args) pairs, args a tuple
-    reset()        -- clear the log and the cursor state
+    reset()        -- clear the log, the cursor state and any armed fault
     arm_close()    -- arm a one-shot 'the user clicked close this frame'
+    arm_fault(...) -- arm a one-shot raise from a named entry point
     snapshot(...)  -- the log as reviewable multi-line text
     counts         -- per-entry-point call counts
     padding        -- the cursor x at the top of a window, i.e. what ui.lua
@@ -424,6 +513,34 @@ class ImGuiRecorder:
 
     def arm_close(self):
         self._s["arm"]()
+
+    def arm_fault(self, name, contains=None):
+        """Arm a one-shot raise from the ImGui entry point `name`.
+
+        With `contains`, the raise only fires on a call one of whose string
+        arguments holds that literal substring (a plain-text find, not a
+        pattern match -- the substrings tests use contain a percent sign).
+        The arming is consumed by the raise, so one arming is one raise, and
+        reset() disarms it.
+
+        What this is: a fault injector. It puts a raise at a chosen point in
+        the render tree so the shell's containment of an error inside
+        d3d_present can be tested at all.
+
+        What this is not: a claim about how Ashita's ImGui binding behaves.
+        The audit's percent-sign hazard is that the binding may treat drawn
+        text as a format string; that cannot be inspected from here, and
+        blessing an unverified host assumption is exactly what Phase 2's
+        CR-01 was about. So this models the *consequence* on demand and never
+        asserts the *cause* by default.
+
+        Ordering: on the stack-moving entry points -- Begin, End,
+        PushStyleVar, PopStyleVar -- the raise happens before the call is
+        logged and counted, so nothing from it appears in `calls` or in
+        `balance()`; a refused push has not pushed. Everywhere else the call
+        is logged and counted first, then raises.
+        """
+        self._s["arm_fault"](name, contains)
 
     def balance(self):
         """Unbalanced stacks are a frame-rate bug, so record them from the
