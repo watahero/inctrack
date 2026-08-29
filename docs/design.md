@@ -127,6 +127,15 @@ this function is not entitled to judge — it declines, and that line costs exac
 what it cost before the gate existed and never more. The gate may therefore only
 ever produce false *positives*, each worth one wasted colour strip.
 
+The marker set is **`0x1E`, `0x1F` and `0x7F`** — the three bytes Ashita's own
+`strip_colors` removes, in a single `gsub` with a character class
+(`addons/libs/sugar/string.lua`, `string_mt.strip_colors`). The gate's set must
+stay a **superset** of the host's, and nothing local can check that: the chatlogs
+contain no marker byte at all, because Ashita's log writer strips them on the way
+to disk. A marker the shell strips but the gate reads through is a real line
+dropped before `strip_colors` ever runs — silently, permanently, and with no
+corpus that could have shown it.
+
 `parser.parse` asks the same question again on entry, so the module is safe
 called standalone, and then applies the second rejection: after trimming and
 stripping any `[HH:MM:SS] ` prefixes, an anchored test against the seven shapes

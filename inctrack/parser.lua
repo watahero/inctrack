@@ -359,9 +359,21 @@ local LBRACKET = ('['):byte();
 *    every plain search for that needle answer no on a line the server really
 *    did send. A line with a code in it is a line this function is not
 *    entitled to judge, so it declines to. That line then costs exactly what
-*    it cost before this function existed, and never more. Two plain searches
-*    rather than one character class: this is the branch every line pays, and
-*    a plain search is the one shape that visibly cannot allocate or backtrack.
+*    it cost before this function existed, and never more.
+*
+*    The marker set is the one Ashita's own strip_colors removes -- 0x1E,
+*    0x1F and 0x7F, stripped in a single gsub with a character class
+*    (addons/libs/sugar/string.lua, string_mt.strip_colors). The set here
+*    must stay a superset of that one, and the coupling is the whole point:
+*    a marker the shell strips but this gate does not decline to judge is a
+*    line lost before strip_colors ever runs. The chatlogs cannot warn about
+*    it either -- they carry no marker bytes at all, because Ashita's log
+*    writer strips them on the way to disk -- so this set is checked against
+*    the host's source rather than against a survey of real lines.
+*
+*    Three plain searches rather than one character class: this is the branch
+*    every line pays, and a plain search is the one shape that visibly cannot
+*    allocate or backtrack.
 *
 * 2. Otherwise, yes when the line holds any one of the literal substrings the
 *    matchers require. Each needle is a literal the corresponding matcher's
@@ -399,7 +411,9 @@ local LBRACKET = ('['):byte();
 * parser.parse keeps its own, unchanged.
 ]]--
 function parser.relevant(line)
-    if line:find('\30', 1, true) or line:find('\31', 1, true) then
+    if line:find('\30', 1, true)
+        or line:find('\31', 1, true)
+        or line:find('\127', 1, true) then
         return true;
     end
 
