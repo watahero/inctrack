@@ -3952,9 +3952,13 @@ def test_addon_shell():
               "a player with automatic show/hide off never has their run "
               "written down: the window is off screen, the frame returned "
               "before the flush, and the whole Incursion is lost on a reload")
-    res.check(hidden_run.sessions[-1] != "",
-              "the frame that drew no window wrote an empty run over the "
-              "Incursion in progress")
+    # Guarded rather than indexed straight: when the flush is misplaced there
+    # is no written session at all, and this check has to be able to go red
+    # about it rather than raise and take the rest of the suite with it.
+    res.check(bool(hidden_run.sessions) and hidden_run.sessions[-1] != "",
+              "the frame that drew no window wrote nothing, or wrote an empty "
+              "run over the Incursion in progress: %r"
+              % (hidden_run.sessions[-1:],))
 
     latched = loaded_host()
     latched.fire_text_in(begins())
@@ -4000,6 +4004,34 @@ def test_addon_shell():
     res.check(first_boon is not None and first_boon["stats"] is not None,
               "the boon picked a heartbeat before the unload was lost, which "
               "is exactly the event the server never announces again")
+
+    # And an unload with nothing owed still writes. The throttle means the
+    # copy on disk can be up to five seconds behind the run the player is
+    # watching, and the unload is the last chance to catch up -- which is why
+    # it does not consult the flag. A kill count inside the throttle window
+    # is precisely that case, and it is the one that tells an unconditional
+    # write from a conditional one.
+    settling = loaded_host()
+    settling.fire_text_in(begins())
+    settling.fire_text_in(phase_line(3, 7))
+    settling.fire("d3d_present")
+    written = settling.json.decode(settling.sessions[-1])
+    res.check(written is not None and int(written["kills_cur"]) == 7,
+              "the frame wrote the run without the kill count it was holding "
+              "at the time: %r" % (settling.sessions[-1],))
+
+    settling.fire_text_in(phase_line(3, 11))
+    saves_before = settling.saves
+    settling.fire("unload")
+    res.check(settling.saves == saves_before + 1,
+              "unloading with a throttled kill count outstanding wrote "
+              "nothing at all (%d writes)" % (settling.saves - saves_before))
+    final = settling.json.decode(settling.sessions[-1])
+    res.check(final is not None and int(final["kills_cur"]) == 11,
+              "the run came back to the kill count it had five seconds "
+              "earlier: the unload wrote only what a frame had already "
+              "written, so everything the throttle was holding is gone: %r"
+              % (settling.sessions[-1],))
 
     # --- a cleared run leaves nothing owed --------------------------------
     #
