@@ -266,7 +266,12 @@ Losing the write does not require a crash at all. A raise inside `persist()` —
 Ashita's `settings.save()` is a synchronous disk write, and a read-only settings
 file or a file another process holds will refuse it — is the other path, which
 is why that raise is caught, re-armed behind a five-second window and reported
-once rather than left silent.
+once rather than left silent. The encode half of `persist()` answers the same
+way and did not always: a run the host's `json.encode` refuses is not a run that
+is over, so nothing is stored and nothing is written, and the last good save
+stays where it is until there is something encodable to replace it with. The one
+value that may be written over a saved run is the empty string, and it means one
+thing only — there is no run to resume.
 
 That is the trade, taken knowingly against a synchronous serialise, JSON encode
 and disk write on the game thread on every chat line the client receives.
@@ -606,7 +611,7 @@ surface area for no benefit the player could not get by opening their bags.
 
 ## Error handling
 
-Four protected boundaries, and one validator, in the order a bad input meets
+Five protected boundaries, and one validator, in the order a bad input meets
 them:
 
 1. **The chat handler.** The whole `text_in` body runs inside a `pcall` on
@@ -637,7 +642,20 @@ them:
    is owed is kept, retried behind the five-second window, and reported once. A
    blob that cannot be *decoded* is discarded and the stored string cleared, so
    an unusable one is not retried on every load forever.
-5. **The structural validator**, which keeps a wrong-shaped blob out of the run
+5. **The load and unload writes.** Neither of these rides a frame, and both
+   were bare `settings.save()` calls until 1.2.1 — so the same read-only file
+   raised into Ashita's event dispatch while the addon was loading, or while it
+   was being unloaded. The load handler's write clears a saved blob this build
+   cannot use, and a raise there left that blob on disk to be met again on the
+   next load, so it is contained and re-armed like every other write: frames
+   follow a load. The unload handler is the one place with no better answer.
+   Its write is unconditional precisely because there will be no further frame,
+   which is also why nothing can retry it — so what it owes is the two things
+   that remain: the raise does not escape into the host, and the loss is said
+   out loud, in a sentence that does not promise a retry that cannot happen.
+   That report is made past the report-once latch, because everything the latch
+   suppresses is a fault that will be tried again and this one will not.
+6. **The structural validator**, which keeps a wrong-shaped blob out of the run
    record entirely. It and the render containment are not redundant: the first
    covers what the second cannot see, which is anything the *live* event stream
    produces.

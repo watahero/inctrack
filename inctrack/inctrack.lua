@@ -331,7 +331,16 @@ ashita.events.register('load', 'incursion_load', function ()
             printf('Resumed run in %s.', tostring(blob.instance));
         else
             incursion.settings.session = '';
-            settings.save();
+            -- Protected and re-armed, same as reset()'s clear and for the
+            -- same reason: this write is the only thing that stops an
+            -- unusable string being met again on every load, and a raise
+            -- here escapes into Ashita's event dispatch while the addon is
+            -- still loading. Frames follow a load, so there is somewhere for
+            -- the retry to happen.
+            local ok, err = pcall(settings.save);
+            if not ok then
+                save_failed(err);
+            end
         end
     end
 end);
@@ -345,7 +354,35 @@ ashita.events.register('unload', 'incursion_unload', function ()
     -- another one -- and its unconditional write is what makes deferring
     -- every other write safe at all. Nothing is owed afterwards.
     incursion.save_due = false;
-    persist();
+
+    --[[
+    * And contained, because a raise here reaches Ashita's event dispatch in
+    * the middle of an addon unload or a client shutdown.
+    *
+    * This is the one failure in the file with no better answer available,
+    * and the ceiling is worth stating rather than dressing up: there is
+    * nowhere to retry to. save_failed() re-arms a write for a later frame
+    * and says so; after this there is no later frame, so using it here would
+    * promise the player a retry that cannot happen. What is actually owed is
+    * the two things that are left -- the raise does not escape into the
+    * host, and the loss is said out loud instead of swallowed.
+    *
+    * Said unconditionally, past save_told, for the same reason: everything
+    * that latch suppresses is a fault that will be tried again. This one is
+    * the last write of the session, so it is a different sentence and it can
+    * only ever be said once anyway -- unload fires once.
+    *
+    * The report is protected as a whole statement and the error text is an
+    * argument, never part of the format string. Same rule as everywhere
+    * else, and unloading is a poor moment to discover an exception to it.
+    ]]--
+    local ok, err = pcall(persist);
+    if not ok then
+        pcall(function ()
+            printf('Could not write the run down on the way out: %s -- '
+                   .. 'anything since the last write is lost.', tostring(err));
+        end);
+    end
 end);
 
 --[[
