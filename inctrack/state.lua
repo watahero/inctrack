@@ -626,11 +626,154 @@ function State:serialise()
     return out;
 end
 
+--[[
+* Structural validation of a decoded session.
+*
+* json.decode is already protected; the decoded *shape* is not. Everything
+* below is well-formed JSON that restore() would previously have trusted: a
+* kill cap that is a string, an objective count the progress bar divides by, a
+* mob list holding a number where table.concat wants a name. A field of the
+* wrong type reaches arithmetic in ui.lua one frame later -- and, since the
+* wall-clock ageing landed, inside restore() itself, which runs outside any
+* protected call at both of its call sites.
+*
+* Two rules govern this, and both are the project's core value restated:
+*
+*   Reject, never coerce. A coerced field is a number the server never sent,
+*   displayed with exactly the same confidence as one it did.
+*
+*   Discard whole, never half-apply. A malformed member fails the entire blob.
+*   A run resumed with one of the two boons the player picked, and nothing on
+*   screen saying the other was dropped, is quietly wrong.
+*
+* Shapes only. The objective's kind is checked for being a string and never
+* against a list of known kinds: a kind the server adds later must survive,
+* and a name of anything belongs in no Lua file here.
+]]--
+
+local function opt_number(v)  return v == nil or type(v) == 'number';  end
+local function opt_string(v)  return v == nil or type(v) == 'string';  end
+local function opt_boolean(v) return v == nil or type(v) == 'boolean'; end
+local function opt_table(v)   return v == nil or type(v) == 'table';   end
+
+local function full_string(v)
+    return type(v) == 'string' and v ~= '';
+end
+
+-- A positive integer key, in the dialect-independent form: JSON decoders hand
+-- back floats where tonumber gives integers, so the test is the value's own
+-- arithmetic, not its subtype.
+local function array_key(k)
+    return type(k) == 'number' and k >= 1 and k % 1 == 0;
+end
+
+-- Every key as well as every value. A stray key or a hole is a shape the
+-- addon's own writers cannot produce, and admitting one would let a decoded
+-- blob smuggle a value past a length-based loop unseen.
+local function array_of(t, ok)
+    if t == nil then
+        return true;
+    end
+    if type(t) ~= 'table' then
+        return false;
+    end
+    for k, v in pairs(t) do
+        if not array_key(k) or not ok(v) then
+            return false;
+        end
+    end
+    return true;
+end
+
+local function map_of(t, ok)
+    if t == nil then
+        return true;
+    end
+    if type(t) ~= 'table' then
+        return false;
+    end
+    for k, v in pairs(t) do
+        if type(k) ~= 'string' or not ok(v) then
+            return false;
+        end
+    end
+    return true;
+end
+
+local function valid_objective(o)
+    if o == nil then
+        return true;
+    end
+    if type(o) ~= 'table' then
+        return false;
+    end
+    return opt_string(o.kind) and opt_string(o.name) and opt_string(o.loc)
+        and opt_string(o.text) and opt_number(o.count)
+        and opt_boolean(o.stale)
+        and array_of(o.mobs, full_string);
+end
+
+local function valid_next_boss(b)
+    if b == nil then
+        return true;
+    end
+    return type(b) == 'table' and full_string(b.name) and opt_string(b.loc);
+end
+
+local function valid_bonus(b)
+    if b == nil then
+        return true;
+    end
+    if type(b) ~= 'table' then
+        return false;
+    end
+    return opt_string(b.kind) and opt_string(b.label) and opt_string(b.loc)
+        and opt_number(b.cur) and opt_number(b.max) and opt_number(b.remaining)
+        and opt_boolean(b.done);
+end
+
+local function valid_boon(b)
+    return type(b) == 'table' and full_string(b.name) and opt_string(b.stats);
+end
+
+local function valid_extra(e)
+    return type(e) == 'table' and opt_string(e.label)
+        and opt_number(e.cur) and opt_number(e.max) and opt_boolean(e.done);
+end
+
+local function valid_session(data)
+    if type(data) ~= 'table' then
+        return false;
+    end
+    return full_string(data.instance)
+        and opt_string(data.difficulty) and opt_string(data.finish_time)
+        and opt_number(data.phase) and opt_number(data.kills_cur)
+        and opt_number(data.kills_max) and opt_number(data.points)
+        and opt_number(data.awards_seen) and opt_number(data.phases_cleared)
+        and opt_number(data.elapsed) and opt_number(data.time_left)
+        and opt_number(data.saved_at)
+        and opt_boolean(data.finished) and opt_boolean(data.points_partial)
+        and valid_objective(data.objective)
+        and valid_next_boss(data.next_boss)
+        and valid_bonus(data.bonus)
+        and array_of(data.boons, valid_boon)
+        and map_of(data.extra, valid_extra);
+end
+
 function State:restore(data)
     if type(data) ~= 'table' or not data.instance then
         return false;
     end
     if data.version ~= 1 and data.version ~= 2 then
+        return false;
+    end
+
+    -- After the version gate, before anything is read for its *value*: the
+    -- wall-clock arithmetic below, the version-1 migration and the clock
+    -- ageing all assume the shapes this answers for. A false answer discards
+    -- the session whole and leaves the state exactly as it was found -- a run
+    -- already in progress is not disturbed by a rejection.
+    if not valid_session(data) then
         return false;
     end
 
@@ -684,8 +827,34 @@ function State:restore(data)
     run.phase          = data.phase;
     run.kills_cur      = data.kills_cur or 0;
     run.kills_max      = data.kills_max;
-    run.objective      = data.objective;
-    run.next_boss      = data.next_boss;
+    -- Copied field by field rather than adopted whole. The decoded blob is a
+    -- table the addon does not own -- the caller keeps a handle on it and can
+    -- change it afterwards -- and adopting it by reference is what review
+    -- finding IN-01 recorded. The bonus, the boons and the extras below were
+    -- already built this way; these two are now the same.
+    if data.objective then
+        local o = data.objective;
+        run.objective = {
+            kind  = o.kind,
+            name  = o.name,
+            loc   = o.loc,
+            text  = o.text,
+            count = o.count,
+            stale = o.stale,
+        };
+        if o.mobs then
+            local mobs = {};
+            for i = 1, #o.mobs do
+                mobs[i] = o.mobs[i];
+            end
+            run.objective.mobs = mobs;
+        end
+    end
+
+    if data.next_boss then
+        run.next_boss = { name = data.next_boss.name, loc = data.next_boss.loc };
+    end
+
     run.points         = data.points or 0;
     if data.version == 1 then
         -- A blob written by 1.1.0. Its 'phases_cleared' was authored by every
@@ -741,16 +910,18 @@ function State:restore(data)
         };
     end
 
-    if type(data.boons) == 'table' then
+    -- Copied unconditionally. The loop used to skip a malformed entry, which
+    -- is a half-apply by definition: the run came back holding one of the two
+    -- boons the player picked, with nothing on screen saying the other was
+    -- dropped. A malformed entry has already failed the whole blob above.
+    if data.boons then
         for i = 1, #data.boons do
             local b = data.boons[i];
-            if type(b) == 'table' and b.name then
-                run.boons[#run.boons + 1] = { name = b.name, stats = b.stats };
-            end
+            run.boons[i] = { name = b.name, stats = b.stats };
         end
     end
 
-    if type(data.extra) == 'table' then
+    if data.extra then
         for labelText, entry in pairs(data.extra) do
             run.extra[labelText] = {
                 label = entry.label or labelText, cur = entry.cur,
