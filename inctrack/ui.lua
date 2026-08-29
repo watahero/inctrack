@@ -9,8 +9,10 @@
 *
 * Read-only: renders a run record from state.lua and never mutates it.
 *
-* No instance, boss, mob or objective name appears in this file. Everything
-* drawn comes from the run record, which comes from the server's own messages.
+* No instance, boss, mob or objective name appears in any code path here.
+* Everything drawn comes from the run record, which comes from the server's own
+* messages. The sketch below names real content on purpose -- it is a picture of
+* the layout, not a source of it, and nothing reads from it.
 *
 * Layout is deliberately dense -- this sits on screen for an hour at a time:
 *

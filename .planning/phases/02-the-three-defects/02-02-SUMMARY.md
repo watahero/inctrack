@@ -114,6 +114,18 @@ completed: 2026-08-29
 status: complete
 ---
 
+> **SUPERSEDED IN PART BY THE PHASE-2 CODE REVIEW (finding CR-01).** This summary
+> was written before review. It records `imgui.Begin(name, flags)` as shipped.
+> The shipped call is **`imgui.Begin(name, nil, flags)`** — Ashita's SDK declares
+> one positional signature `Begin(const char*, bool* p_open, ImGuiWindowFlags)`,
+> and a survey of 220 `imgui.Begin(` call sites across the install found inctrack
+> was the only addon passing flags in slot 2. Passing flags there risked the
+> window silently losing `AlwaysAutoResize`, `NoTitleBar` and `NoMove`, or
+> raising every frame. `test/stubs.py`'s recorder was made strictly positional at
+> the same time so the suite can catch a regression. See `02-REVIEW.md`.
+
+
+
 # Phase 02 Plan 02: The Dead Close Path Summary
 
 **The window stopped asking ImGui for a close control it can never draw and the addon shell stopped waiting for a click on it; the six render snapshots moved by one substring each, FIX-03 went green with its Phase-1 bytes untouched, and the milestone's known-defect count is now zero on both backends.**

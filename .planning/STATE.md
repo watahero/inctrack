@@ -4,7 +4,7 @@ milestone: v1.2.0
 milestone_name: correctness and cost
 current_phase: 4
 current_phase_name: Cost and Record
-status: executing
+status: milestone-complete (four in-game checks open)
 stopped_at: Completed 04-03-PLAN.md -- Phase 4 and milestone v1.2.0 complete
 last_updated: "2026-08-29T09:13:52.656Z"
 last_activity: 2026-08-29
@@ -12,10 +12,10 @@ last_activity_desc: "04-03 complete (DOC-01, DOC-02): ships as 1.2.0 with a CHAN
 state_head: af2c6f17f9f929dbc986d71e6af9195c1d239279
 progress:
   total_phases: 4
-  completed_phases: 1
+  completed_phases: 4
   total_plans: 11
   completed_plans: 11
-  percent: 25
+  percent: 100
 ---
 
 # Project State
@@ -151,7 +151,11 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 | Category | Item | Status | Deferred At | Milestone |
 |----------|------|--------|-------------|-----------|
-| *(none)* | | | | |
+| Behaviour | IN-05 — `opt_number` admits NaN and ±inf; a restored session can render `~-9223372036854775808:...` as the instance clock. `03-REVIEW.md` says it "wants re-deciding rather than applying as written" and no re-decision was recorded. **The only open gap that touches behaviour.** | Open — needs a decision | Phase 3 | v1.2.0 |
+| Coverage | PERF-01's timestamp-loop gate has no test; removing it leaves the suite green | Open | Phase 4 | v1.2.0 |
+| Process | PROC-01…04 — CI, luacheck, a versioned release artifact, a public chatlog fixture | Deliberately v2 | Phase 1 scope decision | v1.2.0 |
+| Review | 29 Info-severity findings across the four phase reviews, none Critical or Warning | Open by design | Phases 1-4 | v1.2.0 |
+| Code | `settings.save()` is unprotected in `reset()`, the command handler and the profile-switch callback — pre-existing, same class as Phase 4 CR-02 but on the command path rather than the frame | Open | Phase 4 audit | v1.2.0 |
 
 ## Session Continuity
 
@@ -184,6 +188,15 @@ to Phases 3-4 rather than pause; neither blocks that work.
   This one exists because CR-01's fix rests on Ashita's SDK header and a survey of
   220 `imgui.Begin(` call sites, not on an observed frame. The compiled binding's
   type handling cannot be inspected, so only a rendered window proves the flags land.
+
+- **Phase 4 — the colour-code fall-through. The priority of the four.** The gate
+  answers yes unconditionally to any line carrying ``, `` or `W`, so a
+  colour code landing inside a needle cannot cause a silent drop. This rule has
+  **zero corpus backing by construction**: Ashita strips all three markers when
+  it writes chatlogs, so none of the 2,951,129 recorded lines can ever exercise
+  it. Its correctness rests entirely on the host-source coupling and synthetic
+  fixtures. A single live Incursion closes it — if the HUD tracks a run normally
+  in ordinary coloured chat, the gate is admitting what it should.
 
 - **Phase 3 item D8 (prudence, not a defect).** The repair does
   `pcall(function () imgui.End(); end)`, which reaches Ashita's GuiManager
