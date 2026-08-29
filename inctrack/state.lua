@@ -408,10 +408,25 @@ function State:apply(e)
 
     if t == 'complete' then
         -- The final phase's boss kill is never followed by a phase line -- the
-        -- run simply ends -- so the completion is what closes it. Guarded so a
-        -- repeated 'Complete!' inside the linger window cannot count twice.
-        if not run.finished then
-            run.phases_cleared = run.phases_cleared + 1;
+        -- run simply ends -- so the completion is what closes the phase we are
+        -- on: reaching 'Phase #N' and then finishing means N cleared.
+        --
+        -- Assigned rather than incremented, and only ever upwards. An
+        -- increment invents a number when there is nothing to add to: a run
+        -- joined at the final phase, where the completion itself bootstraps
+        -- the run, has no phase behind it that we ever saw, and claiming one
+        -- cleared phase for a five-phase run is a confident wrong answer with
+        -- no uncertainty marking left to carry it -- the desync banner is
+        -- suppressed once the run is finished. Assigning also makes a
+        -- repeated 'Complete!' inside the linger window idempotent without a
+        -- guard, and stops a restored count being compounded.
+        --
+        -- A run we watched begin has cleared at least its first phase even if
+        -- no phase line reached us; a run we were dropped into has no floor at
+        -- all, so it gets none.
+        local closing = run.phase or (run.recovered and 0 or 1);
+        if closing > run.phases_cleared then
+            run.phases_cleared = closing;
         end
         run.finished      = true;
         run.finish_time   = string.format('%dm %ds', e.minutes, e.seconds);

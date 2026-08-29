@@ -789,6 +789,56 @@ def test_state_units(lua, parser, State):
               "joining on phase 4 having watched no award left the points "
               "total unmarked, though three bosses paid out unseen")
 
+    # WR-01: the addon is loaded during the final phase of a run and the very
+    # first line it sees is the completion, which bootstraps the run itself.
+    # There is no phase behind that we ever saw, so there is no cleared count
+    # to state -- and unlike every other lower-bound case, nothing marks it:
+    # ui.lua drops the 'reconnected - awaiting update' banner once the run is
+    # finished. A fabricated 'Phases cleared 1' on a five-phase run would be
+    # read as fact.
+    f1d = new_state(lua, State)
+    feed(f1d, parser, [
+        "Incursion [Fort Ghelsba] Complete! (Normal) Time: 48m 44s",
+    ])
+    run = f1d.snapshot(f1d)
+    res.check(int(run["phases_cleared"]) == 0,
+              "a run joined at its completion, with no phase line ever seen, "
+              "claimed %s cleared phases -- a number the addon has no "
+              "evidence for and no banner left to qualify it with"
+              % run["phases_cleared"])
+    res.check(bool(run["recovered"]),
+              "a run bootstrapped by its own completion was not marked as "
+              "recovered, so the count above reads as a watched total")
+
+    # The counterpart, so the fix above is not just 'never count anything':
+    # a run watched from Begins! has cleared its first phase by the time it
+    # completes, whether or not a phase line ever reached us.
+    f1e = new_state(lua, State)
+    feed(f1e, parser, [
+        "Incursion [Fort Ghelsba] Begins! (Normal)",
+        "Incursion [Fort Ghelsba] Complete! (Normal) Time: 9m 02s",
+    ])
+    res.check(int(f1e.snapshot(f1e)["phases_cleared"]) == 1,
+              "a run watched from Begins! to Complete! reported %s cleared "
+              "phases -- the phase it was in when it finished is cleared"
+              % f1e.snapshot(f1e)["phases_cleared"])
+
+    # Idempotence, now that the count is assigned rather than incremented: the
+    # server can repeat a completion inside the 30-second linger window, and
+    # the second one must not move the count.
+    f1f = new_state(lua, State)
+    feed(f1f, parser, [
+        "Incursion [Fort Ghelsba] Begins! (Normal)",
+        "Incursion [Fort Ghelsba] Phase #1 0/20",
+        "Incursion [Fort Ghelsba] Phase #2 0/20",
+        "Incursion [Fort Ghelsba] Complete! (Normal) Time: 12m 30s",
+        "Incursion [Fort Ghelsba] Complete! (Normal) Time: 12m 30s",
+    ])
+    res.check(int(f1f.snapshot(f1f)["phases_cleared"]) == 2,
+              "a repeated completion inside the linger window counted the "
+              "final phase twice: %s"
+              % f1f.snapshot(f1f)["phases_cleared"])
+
     # --- FIX-02, as an expected failure -----------------------------------
 
     # Intended behaviour: time that passed while the addon was unloaded is
