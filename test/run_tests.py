@@ -122,6 +122,32 @@ COMPLETE = re.compile(r"^Incursion \[(.+?)\] Complete!")
 POINTS = re.compile(r"^(\S+) gains (\d+) incursion points\.$")
 PHASE = re.compile(r"^Incursion \[(.+?)\] Phase #(\d+) (\d+)/(\d+)$")
 
+# --- reference shapes for the over-reach guard ----------------------------
+#
+# The guard recomputes each split from the raw line here in Python and compares
+# it with what the parser returned. That is the point of it: a reference
+# derived from the parser would drift with the parser and agree with it while
+# both were wrong. These are derived from the raw text instead.
+#
+# The three ' at ' bodies: everything between the fixed wording and the fixed
+# tail, which is the text the parser must account for in full.
+BOSS_OBJ_BODY = re.compile(r"^New Objective: Defeat (.+)!$")
+BOSS_HINT_BODY = re.compile(r"^\(Boss: (.+)\)$")
+NM_BONUS_BODY = re.compile(
+    r"^Bonus Objective: Defeat (.+)! \(Expires in \d+ Minutes?\)$")
+
+# The mob list body. The separator is comma-space; see split_mobs.
+KILLS_BODY = re.compile(r"^New Objective: Defeat \d+ enemies \((.+)\)$")
+
+# Mirrors the tightened Lua boon pattern deliberately, piece for piece. Two of
+# its pieces are the tightening and are the reason it is written out here
+# rather than reused from anywhere: the glyph group is `[^)]+`, a *non-empty*
+# run, where the shipped form allowed an empty one; and the name, once
+# trimmed, must be non-blank, which the pattern cannot say and the caller
+# checks. Everything else is the 1.1.0 shape unchanged.
+BOON_REF = re.compile(r"^(\S+) gains the effect of (.*?) \(([^)]+)\): (.+)$")
+BOON_PHRASE = " gains the effect of "
+
 
 # Which Lua sits behind lupa is not the addon's choice and is not stable
 # across installs: lupa 2.8 ships lua51..lua55, luajit20 and luajit21, and
@@ -419,9 +445,30 @@ class Result:
 def test_parser(lines, parser):
     coverage = Result("parser: structural lines all parse")
     dormant = Result("parser: generic tier matches nothing today")
+    # The over-reach guard. The three tightened patterns each narrow what they
+    # accept, and the failure mode of a narrowing is silent: a dropped line
+    # looks exactly like a quiet stretch of chat. Coverage above catches a line
+    # that stopped parsing outright. This catches the subtler half -- a line
+    # that still parses but comes back with a name truncated, a location
+    # carrying part of a name, a mob list holding names the server never sent,
+    # or a boon claimed off an ordinary buff.
+    #
+    # Every comparison is recomputed from the raw text in Python, never from
+    # the parser, so a parser and a harness that drift the same way cannot both
+    # be wrong quietly. Suite 2's idiom: one failing check per violation, and a
+    # single passing check plus the tallies when there are none.
+    #
+    # Every message here goes through ascii(): a boon line carries the glyph's
+    # raw high bytes, and a report that dies encoding its own failure text on a
+    # cp1252 console is a traceback where a readable red line was owed.
+    whole = Result("parser: tightened patterns keep every line whole")
 
     kinds = set()
     generics = {}
+    broken = 0
+    # Per-family tallies, so a clean run is distinguishable from a run whose
+    # corpus simply held none of the shape. A silent zero is what this counts.
+    seen = {"at-split": 0, "at-anchor": 0, "mob-list": 0, "boon": 0}
 
     for path, lineno, line in lines:
         ev = parser.parse(line)
@@ -429,6 +476,34 @@ def test_parser(lines, parser):
         if MUST_PARSE.match(line):
             coverage.check(ev is not None,
                            "unparsed %s:%d  %r" % (path, lineno, line))
+
+        # Family 4 is the only one that must look at lines the parser
+        # declined -- a boon claimed when the tail is absent and a boon missed
+        # when it is present are both violations, so the check runs on every
+        # line carrying the phrase. The substring test is what keeps the
+        # regex off the other three million lines.
+        if BOON_PHRASE in line:
+            m = BOON_REF.match(line)
+            if m and m.group(2).strip() == "":
+                m = None                      # a blank name is not a boon
+            claimed = ev is not None and ev["t"] == "boon"
+            if m is not None:
+                seen["boon"] += 1
+            if claimed != (m is not None):
+                broken += 1
+                whole.check(False,
+                            "the window would %s a boon here -- %s:%d  %s"
+                            % ("invent" if claimed else "miss",
+                               path, lineno, ascii(line)))
+            elif claimed and (ev["name"] != m.group(2).strip()
+                              or ev["stats"] != m.group(4).strip()):
+                broken += 1
+                whole.check(False,
+                            "the boon row would read %s / %s where the line "
+                            "says %s / %s -- %s:%d"
+                            % (ascii(ev["name"]), ascii(ev["stats"]),
+                               ascii(m.group(2).strip()),
+                               ascii(m.group(4).strip()), path, lineno))
 
         if ev is None:
             continue
@@ -441,12 +516,89 @@ def test_parser(lines, parser):
             dormant.check(False, "generic %s on %s:%d  %r"
                           % (ev["t"], path, lineno, line))
             generics[ev["t"]] = generics.get(ev["t"], 0) + 1
+            continue
+
+        kind = ev["t"]
+
+        # Families 1 and 2: the ' at ' split, at each of its three sites.
+        # Judged only where the parser actually returned that kind, so a bonus
+        # the count form legitimately claimed is never held to the named-NM
+        # rule and reported as a fault that is not one.
+        body_re = None
+        if kind == "objective_boss":
+            body_re = BOSS_OBJ_BODY
+        elif kind == "boss_hint":
+            body_re = BOSS_HINT_BODY
+        elif kind == "bonus_new" and ev["kind"] == "nm":
+            body_re = NM_BONUS_BODY
+
+        if body_re is not None:
+            m = body_re.match(line)
+            if m is not None:
+                body = m.group(1)
+                name = ev["label"] if kind == "bonus_new" else ev["name"]
+                loc = ev["loc"]
+                seen["at-split"] += 1
+
+                # 1. No text was lost. True under the old split and the new
+                #    one alike -- a pure statement about text survival.
+                if name is None or loc is None or body != "%s at %s" % (name, loc):
+                    broken += 1
+                    whole.check(False,
+                                "the name and location do not add back up to "
+                                "the line: %s + %s vs %s -- %s:%d"
+                                % (ascii(name), ascii(loc), ascii(body),
+                                   path, lineno))
+
+                # 2. The anchor is the last one. Claimed only where the body
+                #    holds a parenthesised group, so new server wording
+                #    without coordinates raises no false alarm.
+                elif " at (" in body:
+                    seen["at-anchor"] += 1
+                    if not loc.startswith("("):
+                        broken += 1
+                        whole.check(False,
+                                    "the coordinates the window draws start "
+                                    "mid-name: %s -- %s:%d"
+                                    % (ascii(loc), path, lineno))
+                    elif " at (" in name:
+                        broken += 1
+                        whole.check(False,
+                                    "the split fell before the coordinate "
+                                    "group, so the name keeps a location: %s "
+                                    "-- %s:%d" % (ascii(name), path, lineno))
+
+        # Family 3: the list is the list, recomputed from the raw body.
+        elif kind == "objective_kills":
+            m = KILLS_BODY.match(line)
+            if m is not None:
+                seen["mob-list"] += 1
+                want = [p.strip() for p in m.group(1).split(", ") if p.strip()]
+                got = list(ev["mobs"].values())
+                if got != want:
+                    broken += 1
+                    whole.check(False,
+                                "the window would list mobs the line does not "
+                                "name: %s vs %s -- %s:%d"
+                                % (ascii(got), ascii(want), path, lineno))
 
     coverage.note("event kinds: %s" % ", ".join(sorted(kinds)))
     if not generics:
         dormant.check(True, "")
         dormant.note("all real lines handled by a specific pattern")
-    return coverage, dormant
+
+    if not broken:
+        whole.check(True, "")
+    whole.note("re-derived from the raw text: %d boss/hint/named-NM splits "
+               "(%d of them with a parenthesised group), %d mob lists, "
+               "%d boon tails"
+               % (seen["at-split"], seen["at-anchor"], seen["mob-list"],
+                  seen["boon"]))
+    for family, n in sorted(seen.items()):
+        if n == 0:
+            whole.note("no %s line in this corpus -- that family is unguarded "
+                       "by this run, not proven by it" % family)
+    return coverage, dormant, whole
 
 
 # --------------------------------------------------------------------------
