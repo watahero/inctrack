@@ -358,8 +358,10 @@ local LBRACKET = ('['):byte();
 * the shell and before trim below -- because the chat handler runs on every
 * line the client receives, forever, and over 127 real logs 97.5% of them are
 * not ours. string.find with plain = true returns indices and never builds a
-* string, so a 'no' here costs seven searches over a short string and nothing
-* else. The number of searches is fixed and does not depend on the input.
+* string, so a 'no' here costs ten searches over a short string and nothing
+* else -- three for the marker bytes below, then the seven needles, all of
+* which must fail. The number of searches is fixed and does not depend on
+* the input.
 *
 * Two rules, in this order.
 *

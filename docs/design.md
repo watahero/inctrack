@@ -111,11 +111,14 @@ different costs on different text.
 `parser.relevant(line)` is the first, and the shell calls it in `text_in`
 **before `strip_colors`**, on the raw message, which is the only place the
 allocation is actually avoidable — no reordering inside `parser.lua` can decline
-to make a call the shell already made. It is seven `string.find` searches with
-`plain = true`, which return indices and never build a string, so a "no" costs a
-fixed number of searches over a short string and nothing else. Each needle is a
-literal the corresponding matcher cannot match without, under every alternation
-and every optional group: the timer needle is `remaining inside this Incursion`,
+to make a call the shell already made. It is ten `string.find` searches with
+`plain = true` — three for the colour-code markers, then the seven needles, all
+of which must fail — which return indices and never build a string, so a "no"
+costs a fixed number of searches over a short string and nothing else.
+
+Each needle is a literal the corresponding matcher cannot match without, under
+every alternation and every optional group: the timer needle is
+`remaining inside this Incursion`,
 beginning *after* the optional plural, because at the one-minute warning the
 server drops the `s` and a needle carrying it would silently stop the clock at
 the moment it matters most.

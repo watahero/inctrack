@@ -5248,6 +5248,41 @@ def test_record(parser):
               % (stated.group(1) if stated else None,
                  len(exported), ", ".join(exported)))
 
+    # --- what a 'no' from the gate costs ----------------------------------
+    #
+    # A cost claim, in a phase whose subject is cost, in the one function
+    # whose budget is the argument for its existence. It said seven while the
+    # marker searches in front of the needles brought it to nine, and CR-01's
+    # third marker brings it to ten. Counted from the function body rather
+    # than believed, and the split is counted too: a marker search is the one
+    # whose literal is an escape.
+    body = parser_src.split("function parser.relevant(line)", 1)[-1]
+    body = body.split("\nend", 1)[0]
+    searches = len(re.findall(r"line:find\(", body))
+    markers = len(re.findall(r"line:find\('\\", body))
+    needles = searches - markers
+    res.check(searches and markers and needles,
+              "parser.relevant's body no longer looks like plain searches "
+              "(%d searches, %d markers, %d needles), so the counts below "
+              "would be checking nothing" % (searches, markers, needles))
+
+    for label, source, pattern in (
+        ("parser.lua", parser_src,
+         r"costs (\w+) searches.{0,120}?(\w+) for the marker bytes"
+         r".{0,60}?then the (\w+) needles"),
+        ("docs/design.md", repo_text("docs", "design.md"),
+         r"It is (\w+) `string\.find` searches.{0,120}?(\w+) for the "
+         r"colour-code markers, then the (\w+) needles"),
+    ):
+        found = re.search(pattern, source, re.S)
+        got = (None if found is None else
+               tuple(NUMBER_WORDS.get(g.lower()) for g in found.groups()))
+        res.check(got == (searches, markers, needles),
+                  "%s states the gate's cost as %r and it is %d searches -- "
+                  "%d for the colour markers, then %d needles"
+                  % (label, None if found is None else found.groups(),
+                     searches, markers, needles))
+
     return res
 
 
