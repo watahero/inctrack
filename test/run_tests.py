@@ -1403,6 +1403,10 @@ def test_json_roundtrip(lua, parser, State, libs):
               "kill progress lost")
     res.check(int(b["points"]) == 84, "points lost")
     res.check(int(b["phases_cleared"]) == 1, "phases_cleared lost")
+    # awards_seen is the sole input to the points lower-bound marking after
+    # FIX-01. If it silently fails to round-trip, a resumed run stops flagging
+    # awards it never saw and nothing else in the suite notices.
+    res.check(int(b["awards_seen"]) == 1, "awards_seen lost")
     res.check(b["objective"]["kind"] == "kills", "objective lost")
     res.check(len(list(b["objective"]["mobs"].values())) == 3, "mob list lost")
     res.check(b["next_boss"]["name"] == "Orcish Martial", "boss hint lost")
