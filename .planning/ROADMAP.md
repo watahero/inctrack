@@ -155,11 +155,11 @@ Plans:
   4. `shorten()`'s memo cache stops growing at a stated bound when fed a stream of distinct server stat strings, and holds nothing from a previous run after a reset or character switch.
   5. `docs/design.md` states what the code does: `AlwaysAutoResize` plus a fixed-width spacer, `NoTitleBar`, the actual stats layout (points tracked, not displayed), the boons row, and the `elapsed_final` / `desynced` / `recovered` / `points_partial` / `bonus.loc` run-record fields. `CHANGELOG.md` has a 1.2.0 entry naming what changed, and `addon.version` in `inctrack/inctrack.lua` reads `'1.2.0'`.
 
-**Plans**: 3 plans
+**Plans**: 1/3 plans executed
 
 Plans:
 
-- [ ] 04-01-PLAN.md — PERF-01/04: the reject-path benchmark and its
+- [x] 04-01-PLAN.md — PERF-01/04: the reject-path benchmark and its
   head-of-phase baseline printed in the test report, an allocation-free cheap
   gate called before `strip_colors`, the timestamp loop gated on a leading `[`,
   a report-once guard on the last unrated chat output, and the `ascii()` fix
@@ -227,7 +227,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. The Net | 3/3 | ✓ Complete | 2026-08-29 |
 | 2. The Three Defects | 2/2 | ✓ Implemented (in-game checks deferred) | 2026-08-29 |
 | 3. Fragile Paths | 3/3 | ✓ Complete | 2026-08-29 |
-| 4. Cost and Record | 0/TBD | Not started | - |
+| 4. Cost and Record | 1/3 | In Progress|  |
 
 ---
 *Roadmap created: 2026-08-29*

@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.2.0
 milestone_name: correctness and cost
-current_phase: 3
-current_phase_name: Fragile Paths
+current_phase: 4
+current_phase_name: Cost and Record
 status: executing
-stopped_at: "Completed 03-03-PLAN.md -- Phase 3 closed: all six HARD requirements, 13,168 checks over 127 logs on both backends, parser still exactly 11819 and generic exactly 1"
-last_updated: "2026-08-29T05:51:29.740Z"
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-08-29T08:35:00.639Z"
 last_activity: 2026-08-29
-last_activity_desc: "03-02 complete: HARD-02/03/04 tightened in parser.lua on a recorded 127-log survey with all eight invariants zero; parser held at exactly 11819 and generic at exactly 1"
-state_head: 10d679e76f3c3717581ab43e68a116f62bf3c915
+last_activity_desc: "04-01 complete: parser.relevant gates the hot path before any allocation (needle derivation re-derived and checked over 2.95M lines, zero parsed lines gated out); reject path 3.5-5x with zero allocations; parse-error line got a report-once latch; three negative controls recorded"
+state_head: 6b60dc48111e1d03a6afdc2d943ea89aba9fc0d6
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 8
-  completed_plans: 8
+  total_plans: 11
+  completed_plans: 9
   percent: 25
 ---
 
@@ -25,16 +25,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-28)
 
 **Core value:** What the window shows is either true, or visibly marked as unconfirmed — never quietly wrong.
-**Current focus:** Phase 3 — Fragile Paths
+**Current focus:** Phase 4 — Cost and Record
 
 ## Current Position
 
-Phase: 3 of 4 (Fragile Paths)
-Plan: 3 of 3 in current phase
-Status: 03-02 complete (HARD-02/03/04) — 03-03 (HARD-05/06) is next
-Last activity: 2026-08-29 — 03-02 complete: the boss split anchors on the last ' at ' before the coordinate group (1.1.0 shape kept as a fallback), the mob list splits on comma-space and the boon tail requires a non-empty glyph and a non-blank name (neither with a fallback); survey of 127 logs recorded with 8/8 invariants zero; adaptability 20 → 41 plus a new corpus over-reach guard; four negative controls, two of them recorded as limits
+Phase: 4 of 4 (Cost and Record)
+Plan: 1 of 3 in current phase
+Status: 04-01 complete (PERF-01, PERF-04) — 04-02 (PERF-02, PERF-03) is next
+Last activity: 2026-08-29 — 04-01 complete: PERF-01's cheap gate lands before strip_colors (seven plain needles, each a literal every matcher requires under every alternation and optional group, re-derived from parser.lua and checked over 2,951,129 log lines with zero parsed lines gated out); a colour-code marker byte makes the gate decline to judge, so a false negative is impossible; PERF-04's benchmark prints the head-of-phase baseline (285,562 lines/s, 3.502 us/line) beside the shipped figure every run; adaptability 42 → 119, addon 143 → 160, parser still exactly 11819 and generic exactly 1; three negative controls recorded
 
-Progress: [███░░░░░░░] 25% of phase 3 (2 of 3 plans)
+Progress: [███░░░░░░░] 25% of phase 4 (1 of 3 plans)
 
 ## Performance Metrics
 
@@ -68,6 +68,7 @@ Progress: [███░░░░░░░] 25% of phase 3 (2 of 3 plans)
 | Phase 03 P01 | 29min | 3 tasks | 3 files |
 | Phase 3 P02 | 1h | 3 tasks | 2 files |
 | Phase 03 P03 | 16min | 3 tasks | 2 files |
+| Phase 04 P01 | 40min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -112,6 +113,13 @@ Recent decisions affecting current work:
 - [Phase 3]: restore() rebuilds objective and next_boss field by field instead of adopting them by reference, closing review finding IN-01 rather than narrowing it
 - [Phase 3]: HARD-06: reset() clears pending_time; the thirty-second staleness guard at begin is untouched because it answers a different question, and a counter-pin keeps the hold the bridge exists for
 - [Phase 3]: The right_text right-alignment finding is accepted as intended behaviour -- pinned by two existing suite locations, not deferred to Phase 4, and not counted as a seventh fragility
+- [Phase 4]: 04-01: the remaining-minutes needle is the plural-free 'remaining inside this Incursion' -- it begins after the optional plural, so the one-minute warning is not silently dropped
+- [Phase 4]: 04-01: the cheap gate answers yes unconditionally to any line carrying a colour-code marker byte, so a code sitting inside a needle cannot produce a false negative; a coloured irrelevant line costs no more than it did (in fact 2 gsubs instead of 5)
+- [Phase 4]: 04-01: both gates stay -- the pre-gate saves the allocation on raw text, the anchored rejection keeps the precision on trimmed text, so the only new risk is a pre-gate false negative
+- [Phase 4]: 04-01: parser.relevant has no type guard, so it stays the handler's first raising string method call and the Phase-1 pcall boundary check keeps proving what it was written to prove
+- [Phase 4]: 04-01: the gsub counter is opt-in and never installed on a timed host; counting and timing are separate passes on separate hosts
+- [Phase 4]: 04-01: no rate is an acceptance threshold -- the one wall-clock assertion is a same-run same-corpus ratio with a 1.2x noise margin, which earned its keep at 1.96x on a busy run against 3.63x on a quiet one
+- [Phase 4]: 04-01: superset checks are written as an implication over fixtures, one per distinct SHAPE a matcher accepts, never as a copied list of expected booleans
 
 ### Pending Todos
 
@@ -135,8 +143,8 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-08-29T05:51:29.533Z
-Stopped at: Completed 03-03-PLAN.md -- Phase 3 closed: all six HARD requirements, 13,168 checks over 127 logs on both backends, parser still exactly 11819 and generic exactly 1
+Last session: 2026-08-29T08:35:00.344Z
+Stopped at: Completed 04-01-PLAN.md
 Resume file: None
 
 ## Deferred Verification
