@@ -327,9 +327,26 @@ ashita.events.register('command', 'incursion_command', function (e)
         -- read as 'hide it', which is the opposite of what was asked.
         if incursion.render_off then
             incursion.render_off = false;
-            -- Back to automatic visibility, so it reappears on its own.
-            incursion.override = nil;
-            printf('Window re-enabled.');
+            -- Deliberately *not* clearing override. Whatever it held is what
+            -- put the window on screen on the frame that failed -- nil under
+            -- automatic visibility, true under a manual show, and it cannot
+            -- have been false because visible() returns before render then --
+            -- so it is also what brings the window back. Clearing it drops a
+            -- manual show, and for a player running with automatic show/hide
+            -- off that is the only thing keeping the window on screen: the
+            -- window would go straight back off while this line said the
+            -- opposite.
+            --
+            -- The line reports what is on screen rather than what was asked
+            -- for. The player can have turned automatic show/hide off in
+            -- between, and there is no wording that can be true of every
+            -- state without looking.
+            if visible() then
+                printf('Window re-enabled.');
+            else
+                printf('Window re-enabled, but it is hidden: automatic '
+                       .. 'show/hide is off. /incursion again to show it.');
+            end
             return;
         end
 

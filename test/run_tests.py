@@ -3890,6 +3890,76 @@ def test_addon_shell():
     res.check(shell_run(back) is None,
               "/incursion reset kept the run it was asked to clear")
 
+    # --- WR-02: the recovery path the error message advertises -------------
+    #
+    # The error line names /incursion as the way back, so what /incursion
+    # does next is the last thing standing between a render failure and a
+    # player with no HUD. A player running with automatic show/hide off has
+    # override = true -- that is the only reason they can see the window at
+    # all -- and dropping it back to automatic visibility on the way out of
+    # the failure puts the window straight back off screen while the chat
+    # line says it is back.
+
+    manual = loaded_host()
+    manual.fire_text_in(begins())
+    manual.fire_text_in(phase_line(1, 3))
+    manual.settings["auto"] = False                   # automatic show/hide off
+    manual.addon["incursion"]["override"] = True      # shown by hand
+
+    manual.imgui.reset()
+    one_frame(manual)
+    res.check("Begin" in drawn_names(manual),
+              "the fixture never had a window on screen, so the recovery "
+              "below is not being asked the question it was written for")
+
+    manual.imgui.arm_fault("PushStyleVar")
+    one_frame(manual)
+    res.check(manual.addon["incursion"]["render_off"] is True,
+              "the render failure was not latched, so the recovery path "
+              "below is never reached")
+
+    chat_before = len(manual.chat)
+    manual.fire("command", command="/incursion")
+    said = manual.chat[chat_before:]
+    manual.imgui.reset()
+    escaped = one_frame(manual)
+    drew = "Begin" in drawn_names(manual)
+
+    res.check(escaped is None and drew,
+              "/incursion after a render error left the window off screen "
+              "for a player running with automatic show/hide off, on the one "
+              "recovery path the error message itself names")
+    res.check(len(said) == 1,
+              "re-enabling the window said %d things instead of one: %r"
+              % (len(said), said))
+    res.check(bool(said) and ("hidden" not in said[0]) == drew,
+              "the chat line and the screen disagree: chat said %r and the "
+              "next frame drew %s -- a line that states something untrue "
+              "about what is on screen is the core value inverted"
+              % (said, "a window" if drew else "nothing"))
+
+    # The other side of the same rule. Here there is nothing to bring the
+    # window back -- no manual show, and automatic show/hide off -- so the
+    # line must not claim there is.
+    stayed = loaded_host()
+    stayed.fire_text_in(begins())
+    stayed.fire_text_in(phase_line(1, 3))
+    stayed.addon["incursion"]["render_off"] = True
+    stayed.settings["auto"] = False
+    chat_before = len(stayed.chat)
+    stayed.fire("command", command="/incursion")
+    said = stayed.chat[chat_before:]
+    stayed.imgui.reset()
+    one_frame(stayed)
+    drew = "Begin" in drawn_names(stayed)
+    res.check(not drew,
+              "the fixture drew a window it had no reason to, so the line "
+              "below is not being held to anything")
+    res.check(bool(said) and "hidden" in said[0]
+              and "/incursion" in said[0],
+              "the window stayed hidden and the player was told it was back, "
+              "with no word on what to do next: %r" % (said,))
+
     return res
 
 
