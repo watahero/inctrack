@@ -1233,6 +1233,62 @@ def test_state_units(lua, parser, State):
     rejects("objective.mobs.tail", "Phantom Mob",
             "mob list is keyed by something other than its own positions, so "
             "a name would ride past a length-based loop unseen")
+
+    # --- WR-01: a hole is not a shorter list -------------------------------
+    #
+    # Every one of these lists is read back with 'for i = 1, #t', and '#' on a
+    # table with a hole is unspecified -- keys {1, 3} answer 1 here. So a list
+    # that satisfies "positive integer keys, valid values" can still carry a
+    # member the loop never reaches, which is the half-apply the whole-blob
+    # rule was written to forbid, arriving by the one route the per-key check
+    # cannot see: a hole is the *absence* of a key, so pairs() never visits
+    # it.
+    #
+    # Reachable rather than contrived: '[{...}, null, {...}]' is well-formed
+    # JSON, the settings file is one a player can edit by hand, and the
+    # persistence suite drives that literal through Ashita's own decoder.
+    rejects("objective.mobs.2", None,
+            "mob list has a hole where its second mob was, so the window "
+            "lists fewer mobs than the blob holds and says nothing about the "
+            "ones it dropped")
+
+    holed = shape_blob()
+    holed["boons"][3] = lua.table_from({"name": "Third Wind",
+                                        "stats": "Regain+1"})
+    holed["boons"][2] = None
+    s_holed = new_state(lua, State)
+    holed_raised = None
+    holed_took = True
+    try:
+        holed_took = bool(s_holed.restore(s_holed, holed))
+    except Exception as exc:                        # noqa: BLE001
+        holed_raised = exc
+    res.check(holed_raised is None and not holed_took
+              and s_holed.snapshot(s_holed) is None,
+              "a boons list with a hole in it was taken, so the run resumed "
+              "holding one of the three boons the player picked with nothing "
+              "on screen saying the other two were dropped: %s"
+              % (holed_raised if holed_raised is not None
+                 else ("accepted" if holed_took
+                       else "a run was left behind")))
+
+    # The rule is contiguity, not length: an empty list and a one-entry list
+    # are both contiguous and both ordinary. json.lua writes an absent boons
+    # list as '[]', so a run one minute old is exactly this shape.
+    for size, what in ((0, "no boons yet"), (1, "one boon")):
+        thinned = shape_blob()
+        for i in (2, 1):
+            if i > size:
+                thinned["boons"][i] = None
+        s_thin = new_state(lua, State)
+        res.check(bool(s_thin.restore(s_thin, thinned)),
+                  "a saved run with %s was refused as though its boons list "
+                  "were malformed" % what)
+        kept_boons = s_thin.snapshot(s_thin)
+        res.check(kept_boons is not None
+                  and len(list(kept_boons["boons"].values())) == size,
+                  "a saved run with %s came back with a different number of "
+                  "boons" % what)
     # A non-table where a sub-table belongs.
     rejects("objective", "Defeat 20 enemies", "objective is a bare string")
     rejects("next_boss", 7, "boss preview is a number")
@@ -2336,6 +2392,56 @@ def test_json_roundtrip(lua, parser, State, libs):
               % (nameless_raised if nameless_raised is not None
                  else ("accepted" if nameless_took
                        else "a run was left behind")))
+
+    # --- WR-01, through Ashita's own decoder ------------------------------
+    #
+    # The hole is the one shape the harness's stub cannot settle, because it
+    # is json.lua's own answer to a JSON null inside an array that produces
+    # it. The literal below is what a hand-edited settings file looks like,
+    # and it is what a truncated or patched blob decodes to.
+    holed = js.decode('{"version":2,"instance":"Davoi","kills_cur":0,'
+                      '"boons":[{"name":"A","stats":"x"},null,'
+                      '{"name":"C","stats":"z"}],"extra":{}}')
+    holed_keys = sorted(int(k) for k in holed["boons"].keys())
+    holed_len = lua.eval("function (t) return #t end")(holed["boons"])
+    res.check(holed_keys == [1, 3],
+              "json.lua no longer drops a null array element, so the case "
+              "below no longer stands for the shape it was written for: %r"
+              % (holed_keys,))
+    res.check(int(holed_len) < 3,
+              "'#' on a table with a hole answered %s here, so this decoder "
+              "would not have half-applied the list and the check below "
+              "proves less than it claims" % (holed_len,))
+    s11 = new_state(lua, State)
+    holed_raised = None
+    holed_took = True
+    try:
+        holed_took = bool(s11.restore(s11, holed))
+    except Exception as exc:                        # noqa: BLE001
+        holed_raised = exc
+    res.check(holed_raised is None and not holed_took
+              and s11.snapshot(s11) is None,
+              "a session whose boons list came back from the decoder with a "
+              "hole in it was taken, so the run resumed holding %s of the 3 "
+              "boons it names, with nothing on screen saying so (%s)"
+              % (holed_len,
+                 holed_raised if holed_raised is not None
+                 else ("accepted" if holed_took else "a run was left")))
+
+    # The other half of the same rule, and the reason it is contiguity and
+    # not length: serialise() always writes 'boons' and 'extra', json.lua
+    # encodes an empty table as '[]', and a run one minute old has both. If
+    # the rule could not tell an empty list from a holed one, every player
+    # who reloaded before picking a boon would lose the run.
+    fresh_encoded = js.encode(thin.serialise(thin))
+    res.check('"boons":[]' in fresh_encoded and '"extra":[]' in fresh_encoded,
+              "json.lua no longer writes an empty table as '[]', so what the "
+              "validator is being asked to accept here is not what the addon "
+              "actually saves: %r" % (fresh_encoded,))
+    fresh_back = new_state(lua, State)
+    res.check(bool(fresh_back.restore(fresh_back, js.decode(fresh_encoded))),
+              "a run with no boons and no extras yet was refused, so a "
+              "player reloading in the first minute of an Incursion loses it")
 
     return res
 

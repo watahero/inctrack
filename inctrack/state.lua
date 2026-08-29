@@ -711,8 +711,27 @@ local function array_of(t, ok)
     if type(t) ~= 'table' then
         return false;
     end
+    local n = 0;
     for k, v in pairs(t) do
         if not array_key(k) or not ok(v) then
+            return false;
+        end
+        n = n + 1;
+    end
+    -- Contiguous from 1, and not merely a set of positive integer keys.
+    -- Every loop that reads one of these lists is driven by '#', and '#' on a
+    -- table with a hole is unspecified: keys {1, 3} answered 1 here, so a
+    -- three-boon list came back holding one boon with nothing on screen
+    -- saying the other two were dropped. That is the half-apply this whole
+    -- validator exists to forbid, and checking the keys one at a time cannot
+    -- see it -- a hole is the absence of a key, so pairs() never visits it.
+    -- Counting what pairs() did visit and then demanding 1..n does.
+    --
+    -- Reachable, not hypothetical: '"boons": [{...}, null, {...}]' is
+    -- well-formed JSON, the settings file is one a player can hand-edit, and
+    -- a decoder that drops null elements hands back exactly {1, 3}.
+    for i = 1, n do
+        if t[i] == nil then
             return false;
         end
     end
