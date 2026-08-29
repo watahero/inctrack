@@ -4184,6 +4184,12 @@ SHELL_MOBS = ("New Objective: Defeat 12 enemies "
 SHELL_FIRST_MOB = "Nest Skitterer"
 
 
+# The timestamp loop's own pattern, written as parser.lua writes it. Matched
+# as a substring of what is handed to gsub, so the loop is identified by what
+# it looks for rather than by how many gsubs happened to run.
+TIMESTAMP_PATTERN = "%[%d%d:%d%d:%d%d%]"
+
+
 def begins(instance=SHELL_INSTANCE):
     return "Incursion [%s] Begins! (Normal)" % instance
 
@@ -4505,6 +4511,33 @@ def test_addon_shell():
               "the stamped line cost no more than the unstamped one (%d vs "
               "%d gsubs), so either the loop runs for both or it runs for "
               "neither" % (stamp_cost, plain_cost))
+
+    # And the half a difference in totals cannot see. ROADMAP Phase 4
+    # criterion 2 asks for three things; this is its third clause, and it is
+    # the one the two totals above are blind to. The loop's guard --
+    # parser.lua (`if s:byte(1) == LBRACKET then`) -- is behaviour-neutral to
+    # remove: the pattern it runs is ^-anchored, so on a line that carries no
+    # stamp the ungated loop finds nothing, breaks immediately and returns the
+    # same event. Every check in this file stays green, and every line the
+    # client receives pays one more gsub forever. The difference above stays
+    # positive too, merely narrowing from two to one.
+    #
+    # So the claim is asserted directly instead: on a line the addon does
+    # parse, and which does not start with '[', the timestamp pattern is not
+    # handed to gsub at all. Counted by the pattern rather than by the total,
+    # which is what makes zero mean "did not run" instead of "ran and found
+    # nothing".
+    plain_loop = plainly.gsub_calls_matching(TIMESTAMP_PATTERN)
+    stamp_loop = stamped.gsub_calls_matching(TIMESTAMP_PATTERN)
+    res.check(plain_loop == 0,
+              "a line with no timestamp ran the timestamp loop %d time(s) "
+              "anyway: the gate on the leading '[' is gone, so every chat "
+              "line the client receives now pays a gsub to strip a prefix it "
+              "does not carry" % plain_loop)
+    res.check(stamp_loop > 0,
+              "the stamped line did not run the timestamp loop either, so "
+              "the check above is passing because nothing is being measured "
+              "rather than because the gate works")
 
     # --- the write policy: decided here, written from the frame (PERF-02) --
     #

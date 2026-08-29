@@ -938,15 +938,31 @@ end
 # unwrapped gsub; the counting pass and the timing pass are separate passes on
 # separate hosts.
 #
+# Every call is tallied against its own pattern as well as into the total,
+# because a total can only answer "how much did this line allocate" and some
+# claims are about *which* gsub ran. The timestamp loop is the one that
+# matters: it is guarded by a byte test -- parser.lua (`if s:byte(1) ==
+# LBRACKET then`) -- and removing that guard is behaviour-neutral, so it moves
+# the total by one and nothing else. A per-pattern tally makes "this gsub did
+# not run" sayable, which is the only shape of assertion that catches it.
+#
 # Installing twice would wrap the wrapper and double every count, so the raw
 # handle doubles as the guard.
 #]]
 GSUB_COUNTER_CHUNK = """
 if __host_gsub_raw == nil then
     __host_gsub_calls = 0;
+    __host_gsub_patterns = {};
     __host_gsub_raw = string.gsub;
     string.gsub = function (...)
         __host_gsub_calls = __host_gsub_calls + 1;
+        -- The pattern is the second argument under both call shapes: the
+        -- method form s:gsub(pat, ...) passes the subject first as well.
+        local pattern = select(2, ...);
+        if type(pattern) == 'string' then
+            __host_gsub_patterns[pattern] =
+                (__host_gsub_patterns[pattern] or 0) + 1;
+        end
         return __host_gsub_raw(...);
     end
 end
@@ -1289,6 +1305,8 @@ class AshitaHost:
     strip_colors_calls  -- how many times string:strip_colors() ran
     count_gsub()        -- install the opt-in string.gsub counter
     gsub_calls          -- how many gsubs ran, once count_gsub() has been called
+    gsub_calls_matching(needle)
+                        -- how many of those ran a pattern containing `needle`
     """
 
     def __init__(self, lua, player="", profile=None):
@@ -1415,11 +1433,33 @@ class AshitaHost:
         that means 'nothing allocated' -- which is precisely the claim
         PERF-01 rests on.
         """
+        self._require_gsub_counter()
+        return int(self._g("__host_gsub_calls"))
+
+    def gsub_calls_matching(self, needle):
+        """How many counted gsubs ran a pattern containing `needle`.
+
+        `gsub_calls` answers "what did this line allocate". This answers
+        "which gsub was it", and that is a different question: a gate whose
+        whole job is that one particular gsub does not run cannot be pinned
+        by a total. Removing such a gate leaves every total larger by one,
+        which no comparison between two different lines can distinguish from
+        the work one of them legitimately does.
+        """
+        self._require_gsub_counter()
+        total = 0
+        for pattern, count in self._g("__host_gsub_patterns").items():
+            if isinstance(pattern, bytes):
+                pattern = pattern.decode("latin-1")
+            if needle in pattern:
+                total += int(count)
+        return total
+
+    def _require_gsub_counter(self):
         if self._g("__host_gsub_raw") is None:
             raise RuntimeError(
                 "this host has no gsub counter installed, so its gsub count "
                 "is unmeasured rather than zero; call host.count_gsub() first")
-        return int(self._g("__host_gsub_calls"))
 
     @property
     def profile_callback(self):
