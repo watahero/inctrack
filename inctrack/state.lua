@@ -566,7 +566,13 @@ function State:serialise()
     -- Timers are stored as remaining durations rather than absolute clock
     -- values, because the clock resets when the addon reloads.
     local out = {
-        version        = 1,
+        -- Version 2: FIX-01 split the single 'phases_cleared' counter in two.
+        -- The field kept its name but changed its meaning -- it now counts
+        -- phases the server announced, not points awards -- and 'awards_seen'
+        -- was added to carry what it used to hold. A version-1 blob therefore
+        -- cannot be read field-for-field, and restore() migrates it rather
+        -- than importing a count authored by the very defect FIX-01 removed.
+        version        = 2,
         instance       = run.instance,
         difficulty     = run.difficulty,
         phase          = run.phase,
@@ -614,7 +620,10 @@ function State:serialise()
 end
 
 function State:restore(data)
-    if type(data) ~= 'table' or data.version ~= 1 or not data.instance then
+    if type(data) ~= 'table' or not data.instance then
+        return false;
+    end
+    if data.version ~= 1 and data.version ~= 2 then
         return false;
     end
 
@@ -653,11 +662,27 @@ function State:restore(data)
     run.objective      = data.objective;
     run.next_boss      = data.next_boss;
     run.points         = data.points or 0;
-    -- A blob written by 1.1.0 has no awards counter, but back then the cleared
-    -- count was incremented by the very awards we are counting, so it is the
-    -- same number.
-    run.awards_seen    = data.awards_seen or data.phases_cleared or 0;
-    run.phases_cleared = data.phases_cleared or 0;
+    if data.version == 1 then
+        -- A blob written by 1.1.0. Its 'phases_cleared' was authored by every
+        -- points award -- bonus payouts and chests included -- and then raised
+        -- to phase-1 by the reconnect inference, so it is max(awards, phase-1)
+        -- and importing it whole would put the defect FIX-01 removed straight
+        -- back on the HUD, one higher than before once the completion lands.
+        --
+        -- The phase number is the one field in that blob the server authored
+        -- outright, so the cleared count is re-derived from it, exactly as a
+        -- live phase line would.
+        --
+        -- The award count is not recoverable at all: max(awards, phase-1)
+        -- over-states it, and an over-stated awards_seen would suppress the
+        -- points lower-bound marking for the rest of the run. Starting at
+        -- zero marks rather than hides, which is the only safe direction.
+        run.awards_seen    = 0;
+        run.phases_cleared = data.phase and (data.phase - 1) or 0;
+    else
+        run.awards_seen    = data.awards_seen or 0;
+        run.phases_cleared = data.phases_cleared or 0;
+    end
     run.points_partial = data.points_partial or false;
     -- The gap counts as run time: the instance kept going without us.
     run.started        = now - (data.elapsed or 0) - gap;

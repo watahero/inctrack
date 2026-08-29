@@ -1487,6 +1487,54 @@ def test_json_roundtrip(lua, parser, State, libs):
     res.check(not s4.restore(s4, s3.serialise(s3)),
               "restore resumed a finished run")
 
+    # --- the upgrade path: a session written by shipped 1.1.0 -------------
+
+    # WR-02. FIX-01 split one counter in two: 'phases_cleared' kept its name
+    # but changed meaning, and 'awards_seen' took over what it used to hold.
+    # A 1.1.0 blob's phases_cleared was incremented by every points award --
+    # bonus payouts and chests as well as bosses -- so importing it whole puts
+    # the defect straight back on the HUD, and the completion then adds one
+    # more. This is a real path: the addon is deployed live, and a player
+    # reloading it mid-run has exactly such a blob in their settings.
+    #
+    # Both branches of the version test are exercised: the legacy migration
+    # here, the current schema by the round trip above.
+    legacy = js.decode(js.encode(s.serialise(s)))
+    legacy["version"] = 1
+    legacy["awards_seen"] = None
+    legacy["phase"] = 3
+    legacy["phases_cleared"] = 5      # authored by five payouts, two phases
+
+    s7 = new_state(lua, State)
+    res.check(bool(s7.restore(s7, legacy)),
+              "a session written by 1.1.0 was rejected outright, losing an "
+              "in-progress run on upgrade")
+    g = s7.snapshot(s7)
+    res.check(int(g["phases_cleared"]) == 2,
+              "a 1.1.0 blob's award-authored count was imported as a cleared "
+              "count: the window says %s cleared phases on a run the server "
+              "only ever put at phase 3" % g["phases_cleared"])
+    res.check(int(g["awards_seen"]) == 0,
+              "a 1.1.0 blob's award count was carried over as though it were "
+              "trustworthy (%s) -- it is max(awards, phase - 1), so an "
+              "over-statement, and over-stating it silences the points "
+              "lower-bound marking for the rest of the run" % g["awards_seen"])
+
+    # And the completion must not compound it, which is what took a restored
+    # 5 to 6 before WR-01 and WR-02.
+    feed(s7, parser, ["Incursion [Fort Ghelsba] Complete! (Normal) Time: 40m 0s"])
+    res.check(int(s7.snapshot(s7)["phases_cleared"]) == 3,
+              "the completion compounded a restored count instead of closing "
+              "the phase the run was on: %s"
+              % s7.snapshot(s7)["phases_cleared"])
+
+    # A future schema is refused rather than read with today's field meanings.
+    s8 = new_state(lua, State)
+    future = js.decode(js.encode(s.serialise(s)))
+    future["version"] = 3
+    res.check(not s8.restore(s8, future),
+              "restore read a blob from a schema it does not know")
+
     # Garbage is rejected rather than half-applied.
     s5 = new_state(lua, State)
     res.check(not s5.restore(s5, lua.table_from({"version": 99})),
