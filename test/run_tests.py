@@ -1233,9 +1233,6 @@ def test_state_units(lua, parser, State):
     rejects("objective.mobs.tail", "Phantom Mob",
             "mob list is keyed by something other than its own positions, so "
             "a name would ride past a length-based loop unseen")
-    rejects("objective.mobs.2", "",
-            "mob list holds a blank name, so the window draws an empty entry")
-
     # A non-table where a sub-table belongs.
     rejects("objective", "Defeat 20 enemies", "objective is a bare string")
     rejects("next_boss", 7, "boss preview is a number")
@@ -1257,14 +1254,132 @@ def test_state_units(lua, parser, State):
     # string and never against a list of known kinds: a kind the server adds
     # later must survive.
     rejects("objective.kind", 3, "objective kind is a number")
-    rejects("next_boss.name", "", "boss preview has a blank name")
     rejects("extra.Seals Broken", "2/6",
             "extras entry is a string rather than a counter")
     rejects("difficulty", 5, "difficulty is a number")
     rejects("points_partial", "yes",
             "points lower-bound marking is a string rather than a flag")
-    rejects("instance", "",
-            "instance name is blank, so the window names no instance at all")
+    # --- CR-01: a blank string is the right shape carrying nothing ---------
+    #
+    # These three fields were once required to be *non-empty*, and failing
+    # that failed the whole blob. The rule was the wrong size for the harm:
+    # a blank draws nothing on screen, while the refusal costs the run's
+    # boons, points, phase and elapsed, none of which the server ever sends
+    # again. It was also self-inflicted -- the addon's own writers produce
+    # every one of these -- so a single degenerate server line turned every
+    # later reload of that run into total loss.
+
+    def accepts_blank(path, value, what):
+        """A blob differing from the known-good one only by a blank string.
+
+        Asserts three things together: it was taken, a run was left behind,
+        and that run still holds everything the fixture put in it. Accepting
+        the blob but dropping what came with it would be the half-apply the
+        whole-blob rule forbids, in the other direction.
+        """
+        s = new_state(lua, State)
+        blob = broken(path, value)
+        raised = None
+        took = False
+        try:
+            took = bool(s.restore(s, blob))
+        except Exception as exc:                    # noqa: BLE001
+            raised = exc
+        run = s.snapshot(s)
+        res.check(raised is None and took and run is not None,
+                  "a saved session %s was thrown away whole, so the reload "
+                  "cost the player the boons, points and phase of a live run "
+                  "over a field that draws nothing: %s"
+                  % (what, raised if raised is not None
+                     else ("refused" if not took else "no run was left")))
+        res.check(run is not None
+                  and int(run["points"]) == 84
+                  and int(run["phase"]) == 2
+                  and int(run["kills_max"]) == 20
+                  and len(list(run["boons"].values())) == 2
+                  and run["bonus"] is not None
+                  and run["objective"] is not None,
+                  "a saved session %s came back short of what it held when it "
+                  "was written" % what)
+        return run
+
+    kept = accepts_blank(
+        "next_boss.name", "",
+        "whose boss preview had a blank name -- which is what the parser "
+        "writes for '(Boss:  at (J-9))'")
+    res.check(kept is not None and kept["next_boss"] is not None
+              and kept["next_boss"]["name"] == ""
+              and kept["next_boss"]["loc"] == "(G-6)",
+              "the blank name took the boss preview's location with it, so "
+              "the one thing that line did say was dropped too: %r"
+              % (dict(kept["next_boss"]) if kept is not None
+                 and kept["next_boss"] is not None else None,))
+
+    kept = accepts_blank(
+        "instance", "",
+        "whose instance name was blank -- which is what the parser writes "
+        "for 'Incursion [] Begins!'")
+    res.check(kept is not None and kept["instance"] == "",
+              "a blank instance name was coerced into something the server "
+              "never sent: %r" % (kept["instance"] if kept is not None
+                                  else None,))
+
+    kept = accepts_blank(
+        "objective.mobs.2", "",
+        "whose mob list held a blank name -- which 1.1.0's list split wrote "
+        "for any list carrying an empty piece")
+    res.check(kept is not None and kept["objective"]["mobs"] is not None
+              and len(list(kept["objective"]["mobs"].values())) == 3,
+              "the blank entry took the other two mobs with it: %r"
+              % (list(kept["objective"]["mobs"].values())
+                 if kept is not None else None,))
+
+    # The same thing end to end, driven by server text rather than by
+    # reaching into a blob: the parser writes the blank, serialise() saves
+    # it, and the reload must bring the run back.
+    blanked = new_state(lua, State)
+    feed(blanked, parser, SHAPE_FIXTURE + ["(Boss:  at (J-9))"])
+    written = blanked.serialise(blanked)
+    res.check(written["next_boss"]["name"] == "",
+              "the fixture no longer writes a blank boss name, so the case "
+              "below proves nothing: %r" % (written["next_boss"]["name"],))
+    reloaded = new_state(lua, State)
+    reload_raised = None
+    reload_took = False
+    try:
+        reload_took = bool(reloaded.restore(reloaded, written))
+    except Exception as exc:                        # noqa: BLE001
+        reload_raised = exc
+    back = reloaded.snapshot(reloaded)
+    res.check(reload_raised is None and reload_took and back is not None,
+              "a run the addon had just written itself was refused on reload "
+              "because one server line named no boss: %s"
+              % (reload_raised if reload_raised is not None else "refused"))
+    res.check(back is not None
+              and int(back["points"]) == 84
+              and len(list(back["boons"].values())) == 2
+              and int(back["phase"]) == 2,
+              "the run came back without the boons and points a blank boss "
+              "name had nothing to do with")
+
+    # And with a blank instance, which is the other line the parser writes.
+    nameless_inst = new_state(lua, State)
+    feed(nameless_inst, parser, [
+        "Incursion [] Begins! (Normal)",
+        "Godwen gains 84 incursion points.",
+        "Godwen gains the effect of Ronin's Revenge (X): WS Accuracy+15",
+    ])
+    inst_blob = nameless_inst.serialise(nameless_inst)
+    res.check(inst_blob["instance"] == "",
+              "the fixture no longer writes a blank instance, so the case "
+              "below proves nothing: %r" % (inst_blob["instance"],))
+    inst_back = new_state(lua, State)
+    res.check(bool(inst_back.restore(inst_back, inst_blob))
+              and inst_back.snapshot(inst_back) is not None
+              and int(inst_back.snapshot(inst_back)["points"]) == 84,
+              "a run whose 'Begins!' line named no instance was thrown away "
+              "on reload, taking its points and boons with it")
+
 
     # A rejection leaves the run the player is actually in alone. It is
     # neither replaced by a half-built one nor cleared.

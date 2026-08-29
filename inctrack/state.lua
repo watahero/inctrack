@@ -656,8 +656,42 @@ local function opt_string(v)  return v == nil or type(v) == 'string';  end
 local function opt_boolean(v) return v == nil or type(v) == 'boolean'; end
 local function opt_table(v)   return v == nil or type(v) == 'table';   end
 
-local function full_string(v)
-    return type(v) == 'string' and v ~= '';
+--[[
+* Shape, never content.
+*
+* Every string field below is checked for *being* a string and never for
+* saying anything. An earlier form of this validator demanded a *non-empty*
+* string for the instance name, the boss preview's name, a boon's name and
+* every mob in the list. A blank one there is not a wrong shape; it is the
+* right shape carrying nothing, and every consumer already handles it --
+* imgui.TextColored('') draws nothing at all.
+*
+* The two costs are not comparable. A blank field costs one empty row on
+* screen. Refusing the blob costs the whole run -- boons, points, phase,
+* elapsed -- and the server re-announces none of it, so nothing can put it
+* back. Refusing is right where accepting would put a name or a number on
+* screen that the server never sent. A blank puts nothing on screen at all,
+* so it cannot be the thing that lies.
+*
+* Nor is a blank hypothetical here. The addon's own writers produce them:
+*
+*   'Incursion [] Begins! (Normal)'    -> instance = ''
+*   '(Boss:  at (J-9))'                -> next_boss.name = ''
+*   'New Objective: Defeat  at (J-9)!' -> objective.name = ''
+*
+* and a blob written by shipped 1.1.0 -- which restore() still accepts, by
+* version -- can carry a blank boon name (its boon matcher had no name
+* guard) or a blank mob (its list split kept empty pieces). Those blobs are
+* on players' disks today. Demanding a non-blank string here turns one
+* degenerate server line, or an upgrade, into total loss of a live run: the
+* precise harm the persistence layer exists to prevent.
+*
+* What still fails a blob is a field of the wrong *type* -- nil where a name
+* belongs, a number, a nested table -- because those are what reach
+* arithmetic and table.concat, and those are what no writer here produces.
+]]--
+local function is_string(v)
+    return type(v) == 'string';
 end
 
 -- A positive integer key, in the dialect-independent form: JSON decoders hand
@@ -710,14 +744,14 @@ local function valid_objective(o)
     return opt_string(o.kind) and opt_string(o.name) and opt_string(o.loc)
         and opt_string(o.text) and opt_number(o.count)
         and opt_boolean(o.stale)
-        and array_of(o.mobs, full_string);
+        and array_of(o.mobs, is_string);
 end
 
 local function valid_next_boss(b)
     if b == nil then
         return true;
     end
-    return type(b) == 'table' and full_string(b.name) and opt_string(b.loc);
+    return type(b) == 'table' and is_string(b.name) and opt_string(b.loc);
 end
 
 local function valid_bonus(b)
@@ -733,7 +767,7 @@ local function valid_bonus(b)
 end
 
 local function valid_boon(b)
-    return type(b) == 'table' and full_string(b.name) and opt_string(b.stats);
+    return type(b) == 'table' and is_string(b.name) and opt_string(b.stats);
 end
 
 local function valid_extra(e)
@@ -745,7 +779,7 @@ local function valid_session(data)
     if type(data) ~= 'table' then
         return false;
     end
-    return full_string(data.instance)
+    return is_string(data.instance)
         and opt_string(data.difficulty) and opt_string(data.finish_time)
         and opt_number(data.phase) and opt_number(data.kills_cur)
         and opt_number(data.kills_max) and opt_number(data.points)
