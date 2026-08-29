@@ -4212,6 +4212,22 @@ def loaded_host(player=PLAYER, profile=None):
     return host
 
 
+def fire_escape(host, event, **fields):
+    """Drive one host event; return the error text if a raise got out.
+
+    Ashita calls these handlers from its own event dispatch, so a raise that
+    leaves one is not a log line -- it reaches the host with the addon's
+    stack under it. Every such path is asserted on rather than allowed to
+    take the suite down: a test that dies of the very fault it is measuring
+    reports 'harness crashed' where it should report one red check.
+    """
+    try:
+        host.fire(event, **fields)
+    except Exception as exc:                              # noqa: BLE001
+        return str(exc).splitlines()[0]
+    return None
+
+
 def shell_state(host):
     """The State instance the shell holds. lupa does not bind self, so the
     caller passes the receiver explicitly: state.snapshot(state)."""
@@ -4970,6 +4986,81 @@ def test_addon_shell():
     res.check(cleared.settings["session"] == "",
               "the run the player cleared came back on the next frame: %r"
               % (cleared.settings["session"],))
+
+    # --- a cleared run the disk refuses to take (D-02) --------------------
+    #
+    # reset() clears save_due first -- correctly, so a write owed from before
+    # the clear cannot put the run straight back -- and then makes its own
+    # settings.save(). Unprotected, that raise left the command handler for
+    # Ashita's dispatch; and because save_due had just been cleared with
+    # nothing to re-arm it, the in-memory 'session = ""' was owed to a write
+    # no later frame would ever make. The previous run stayed on disk and was
+    # resumed on the next load: the player throws a run away, sees a raise
+    # instead of 'Run cleared.', and is handed the run back.
+    #
+    # An *ordering* defect and not merely an unprotected call, which is why
+    # it is pinned in both halves below: wrapping the save in a pcall and
+    # stopping there catches the raise and leaves the resurrection exactly
+    # where it was.
+    zombie = loaded_host()
+    zombie.fire_text_in(begins())
+    zombie.fire_text_in(SHELL_MOBS)
+    zombie.fire("d3d_present")
+    on_disk = zombie.settings["session"]
+    res.check(on_disk != "",
+              "the fixture never got the run onto disk, so there is nothing "
+              "here for a failed clear to resurrect")
+
+    zombie.fail_saves()
+    chat_before = len(zombie.chat)
+    attempts_before = zombie.save_attempts
+    escaped = fire_escape(zombie, "command", command="/incursion reset")
+    res.check(escaped is None,
+              "a refused disk write threw out of the command handler and "
+              "into Ashita's event dispatch: %s" % escaped)
+    res.check(zombie.save_attempts > attempts_before,
+              "/incursion reset never tried to write the clear down at all, "
+              "so the check above passed for the wrong reason")
+    res.check(shell_run(zombie) is None,
+              "the run the player asked to clear is still on screen")
+    res.check(zombie.addon["incursion"]["save_due"] is True,
+              "the clear is owed to a disk write that failed, and nothing "
+              "re-armed it, so no frame will ever make it: the run the "
+              "player threw away is still on disk and comes back on the next "
+              "load")
+
+    said = zombie.chat[chat_before:]
+    res.check(any("100%" in line for line in said),
+              "clearing the run failed and the player was not told what the "
+              "host said about it -- or the percent sign in it was pasted "
+              "into a format string: %r" % (said,))
+    res.check(any("Run cleared" in line for line in said),
+              "the run was cleared and the player was told only about the "
+              "disk: %r" % (said,))
+    res.check(len(said) == 2,
+              "clearing a run onto a refused disk produced %d chat lines; it "
+              "is one report of the fault and one 'Run cleared.'" % len(said))
+
+    # The re-arm has to actually land, which is the whole point of it: the
+    # clear reaches disk on the first frame past the retry window.
+    zombie.heal_saves()
+    zombie.tick(6.0)
+    zombie.fire("d3d_present")
+    res.check(zombie.settings["session"] == "",
+              "the cleared run was back in the settings after the disk came "
+              "back: %r" % (zombie.settings["session"],))
+    res.check(bool(zombie.sessions) and zombie.sessions[-1] == "",
+              "the clear never reached disk once the disk came back, so the "
+              "last thing written is still the run that was thrown away: %r"
+              % (zombie.sessions[-1:],))
+
+    # And end to end, which is what the player actually meets: a fresh addon
+    # loaded against whatever is on disk now.
+    afterwards = loaded_host(profile={"session": (zombie.sessions[-1]
+                                                  if zombie.sessions
+                                                  else on_disk)})
+    res.check(shell_run(afterwards) is None,
+              "the run the player cleared was resumed on the next load")
 
     # And a character change, which does its own clearing rather than calling
     # reset(). A write owed by the old character must not land in the new
