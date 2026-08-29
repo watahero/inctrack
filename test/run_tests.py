@@ -2553,6 +2553,7 @@ def test_addon_shell():
     switched = loaded_host()
     switched.fire_text_in(begins())
     switched.addon["incursion"]["override"] = False   # a manual hide
+    switched.addon["incursion"]["render_off"] = True  # and a render failure
     saves_before = switched.saves
     switched.switch_profile(
         {"session": other.settings["session"], "locked": True})
@@ -2568,6 +2569,9 @@ def test_addon_shell():
     res.check(inc["override"] is None,
               "a window hidden by hand on one character stayed hidden on the "
               "next")
+    res.check(inc["render_off"] is False,
+              "a window switched off by a render error on one character came "
+              "up switched off on the next, who never saw the failure")
     res.check(inc["settings"]["locked"] is True,
               "the new character's own settings were not adopted")
     res.check(switched.saves == saves_before + 1,

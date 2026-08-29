@@ -31,6 +31,10 @@ local json     = require('json');
 local parser   = require('parser');
 local State    = require('state');
 local ui       = require('ui');
+-- ui.lua requires this too, so both handles are the same table through
+-- package.loaded. The shell needs its own because the stack repair after a
+-- caught render error is made from here, not from the draw function.
+local imgui    = require('imgui');
 
 local default_settings = T{
     -- Show and hide the window automatically around a run.
@@ -49,6 +53,15 @@ local incursion = T{
     -- lasts until the next run starts.
     override = nil,
     save_at  = 0,
+    -- Set when ui.render raised inside d3d_present. The window takes itself
+    -- off screen for the rest of the session rather than failing sixty times
+    -- a second; /incursion and /incursion reset both clear it.
+    render_off = false,
+    -- Set the first time render returned cleanly with a run to draw. It says
+    -- the render shape has run end to end on this host, which is what makes
+    -- the stack repair below a repair rather than a guess. Deliberately not
+    -- cleared by reset(): it is a fact about the host, not about the run.
+    render_ok  = false,
 };
 
 -- Events worth a disk write the moment they land, because the server never
@@ -96,6 +109,9 @@ end
 local function reset(quiet)
     incursion.state:reset();
     incursion.override = nil;
+    -- Clearing the run is also a way back from a window that switched itself
+    -- off, so /incursion reset recovers the HUD as well as the run.
+    incursion.render_off = false;
     incursion.settings.session = '';
     settings.save();
     if not quiet then
@@ -205,16 +221,90 @@ end);
 
 --[[
 * event: d3d_present
+*
+* ui.render runs here, on the game thread, once per frame. It is handed
+* strings that came off the wire and tables that came out of a JSON blob, so
+* an error is reachable -- and an error here is not a log line: it leaves the
+* ImGui window and style stacks unbalanced for every addon in the process,
+* and then it happens again on the next frame, and the one after.
+*
+* So it is contained here rather than inside ui.lua, beside the pcall that
+* has protected text_in since 1.0.0. One pattern, one place, and ui.lua stays
+* a pure draw function.
 ]]--
 ashita.events.register('d3d_present', 'incursion_present', function ()
+    -- Already failed once this session. Return before asking anything else,
+    -- so the failure costs one branch a frame instead of repeating.
+    if incursion.render_off then
+        return;
+    end
+
     if not visible() then
         return;
     end
 
-    ui.render(incursion.state, {
+    local ok, err = pcall(ui.render, incursion.state, {
         visible = true,
         locked  = incursion.settings.locked,
     });
+
+    if ok then
+        -- A frame that took render's early return proves nothing about the
+        -- window, so the latch wants a run to have been drawn as well. The
+        -- guard short-circuits once it is set, so after the first drawn frame
+        -- this costs nothing.
+        if not incursion.render_ok and incursion.state:snapshot() ~= nil then
+            incursion.render_ok = true;
+        end
+        return;
+    end
+
+    --[[
+    * Repair what is owed, and only what is owed.
+    *
+    * render's shape is fixed and short -- state:snapshot() with its early
+    * return, the flags arithmetic, one PushStyleVar, Begin, the draws, an
+    * unconditional End, the pop -- and three of those statements run *before*
+    * Begin. A raise from any of them leaves nothing open and nothing pushed,
+    * so an End there is an unmatched close: on a real host that is an ImGui
+    * assert, which would make this repair the second error of the frame --
+    * the exact failure the guard above exists to prevent.
+    *
+    * render_ok is the one fact the shell can hold honestly. It says the
+    * render shape has run end to end on this host at least once, so the
+    * constants are good, the push is good and the Begin is good, and what
+    * raised afterwards is inside the window. Every data-driven raise site
+    * does sit between Begin and the End, so exactly one window and one style
+    * var are owed -- but the shell cannot see inside render and must not
+    * guess which. When render_ok is not set, repair nothing: a style var left
+    * pushed is recovered when the frame ends; an unmatched close is not.
+    *
+    * The style *colour* stack is deliberately not repaired. Its only push and
+    * pop in the whole file bracket a single ImGui call with no data-driven
+    * raise site between them, so nothing can stop between them. The addon
+    * suite asserts all three stacks anyway, so if that ever stops being true
+    * the tests say so rather than a guess here quietly papering over it.
+    *
+    * One residual, stated rather than guarded: the flags arithmetic reads
+    * opts.locked, so a nil ImGui constant reached only on the locked path
+    * could raise before Begin on a host where an unlocked frame has already
+    * drawn clean, and there this would over-close by one window. Nothing
+    * data-driven reaches it and no test provokes it.
+    *
+    * Each repair call is protected on its own, for the same reason as above:
+    * neither of them may become the second error of the frame either.
+    ]]--
+    if incursion.render_ok then
+        pcall(imgui.End);
+        pcall(imgui.PopStyleVar, 1);
+    end
+
+    incursion.render_off = true;
+
+    -- The error text is an argument and never part of the format string: a
+    -- percent sign in server text is one of the things that gets us here.
+    printf('Render error, window disabled: %s -- /incursion to try again.',
+           tostring(err));
 end);
 
 --[[
@@ -232,6 +322,17 @@ ashita.events.register('command', 'incursion_command', function (e)
     local sub = (args[2] or ''):lower();
 
     if sub == '' then
+        -- A window switched off by a render error is re-enabled here, not
+        -- toggled. Toggling against a window that is not being drawn would
+        -- read as 'hide it', which is the opposite of what was asked.
+        if incursion.render_off then
+            incursion.render_off = false;
+            -- Back to automatic visibility, so it reappears on its own.
+            incursion.override = nil;
+            printf('Window re-enabled.');
+            return;
+        end
+
         -- Toggle against what is currently on screen.
         incursion.override = not visible();
         if incursion.override and incursion.state:snapshot() == nil then
@@ -279,6 +380,10 @@ settings.register('settings', 'incursion_settings_update', function (s)
 
         incursion.state:reset();
         incursion.override = nil;
+        -- A render failure on the old character is not the new character's
+        -- problem. This callback does its own clearing rather than calling
+        -- reset(), so the field has to be cleared here too.
+        incursion.render_off = false;
         -- nil makes the text_in handler re-fetch the name on the next event,
         -- once the new character actually exists in memory.
         incursion.state:set_player(nil);
