@@ -574,7 +574,7 @@ surface area for no benefit the player could not get by opening their bags.
 
 ## Error handling
 
-Three protected boundaries, and one validator, in the order a bad input meets
+Four protected boundaries, and one validator, in the order a bad input meets
 them:
 
 1. **The chat handler.** The whole `text_in` body runs inside a `pcall` on
@@ -584,13 +584,23 @@ them:
    reading the next line — and it prints once per session. The error text is
    always an argument and never part of a format string, because a percent sign
    in server text is one of the things that gets us there in the first place.
-2. **The frame handler.** The render `pcall`, its two latches and its conditional
-   stack repair, as described above.
-3. **The settings round trip.** `json.encode` and `json.decode` are both
+2. **The frame handler, drawing.** The render `pcall`, its two latches and its
+   conditional stack repair, as described above.
+3. **The frame handler, writing.** The deferred flush runs *above* the render
+   `pcall`, so it needs a containment of its own rather than sitting inside
+   that one. `persist()` ends in `settings.save()`, Ashita's synchronous disk
+   write, which a read-only settings file or a file another process holds will
+   refuse — and a raise there is not a log line either: it reaches the game
+   thread every addon in the process shares, and it skips the render for that
+   frame. So it is `pcall`ed, its failure re-arms the owed write behind a
+   five-second window rather than dropping it, and it prints once per session
+   with `/incursion reset` as the stated way back. Same shape as the two
+   latches above; the error text is an argument there too.
+4. **The settings round trip.** `json.encode` and `json.decode` are both
    `pcall`-wrapped. A failed encode writes an empty session rather than a partial
    blob; a blob that cannot be decoded is discarded and the stored string
    cleared, so an unusable one is not retried on every load forever.
-4. **The structural validator**, which keeps a wrong-shaped blob out of the run
+5. **The structural validator**, which keeps a wrong-shaped blob out of the run
    record entirely. It and the render containment are not redundant: the first
    covers what the second cannot see, which is anything the *live* event stream
    produces.

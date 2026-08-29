@@ -5316,6 +5316,28 @@ def test_record(parser):
                   "write; a raise inside persist() loses one with nothing on "
                   "fire at all" % name)
 
+    # --- the error-handling list counts its own entries -------------------
+    #
+    # It said "three protected boundaries, and one validator" over four
+    # entries, and described the frame handler's boundary as the render pcall
+    # alone -- while an unprotected disk write ran above it (CR-02). Counted
+    # against the list rather than trusted.
+    design = repo_text("docs", "design.md")
+    stated = re.search(r"(\w+) protected boundaries, and (\w+) validator",
+                       design)
+    listed = 0
+    if stated is not None:
+        for n in re.findall(r"^(\d+)\. \*\*", design[stated.end():], re.M):
+            if int(n) != listed + 1:
+                break
+            listed = int(n)
+    claimed = (None if stated is None else
+               sum(NUMBER_WORDS.get(g.lower(), -99) for g in stated.groups()))
+    res.check(claimed == listed and listed > 0,
+              "docs/design.md's error-handling section claims %r and then "
+              "lists %d entries"
+              % (None if stated is None else stated.groups(), listed))
+
     return res
 
 
