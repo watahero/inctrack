@@ -1102,6 +1102,218 @@ def test_state_units(lua, parser, State):
               % (round(fwd_back_left), round(fwd_back_elapsed),
                  round(fwd_left), round(fwd_elapsed)))
 
+    # --- HARD-05: a session of the wrong shape is discarded whole ----------
+
+    # restore() checks the version, the instance, whether the run finished and
+    # how old it is -- and then trusts the rest structurally. Well-formed JSON
+    # of the wrong shape therefore reaches arithmetic: in ui.lua one frame
+    # later, and since Phase 2 inside restore() itself, which runs outside any
+    # protected call at both of its call sites (review finding IN-01).
+    #
+    # Every case below is a real serialise() output with exactly *one* field
+    # broken, so a rejection can never be attributed to the wrong cause. Every
+    # case asserts the same three things together: the call returned falsy, no
+    # run was left behind, and nothing was raised.
+
+    lua.globals()["__clock"] = 0
+
+    SHAPE_FIXTURE = [
+        "You have 90 minutes remaining inside this Incursion.",
+        "Incursion [Fort Ghelsba] Begins! (Normal)",
+        "New Objective: Defeat 20 enemies (Orcish Grappler, Orcish Mesmerizer, Orcish Fodder)",
+        "(Boss: Orcish Martial at (G-6))",
+        "Godwen gains 84 incursion points.",
+        "Incursion [Fort Ghelsba] Phase #2 13/20",
+        "Bonus Objective: Defeat 5 Sentry Lizard! (Expires in 10 Minutes)",
+        "Incursion [Fort Ghelsba] Bonus Objective: Sentry Lizard 2/5",
+        "Incursion [Fort Ghelsba] Seals Broken 2/6",
+        "Godwen gains the effect of Ronin's Revenge (X): WS Accuracy+15",
+        "Godwen gains the effect of Second Wind (X): Regen+3",
+    ]
+
+    def shape_blob():
+        """A fully populated, well-formed serialise() output.
+
+        Rebuilt from a fresh state on every call: serialise() hands out the
+        live run's own objective and next_boss tables, so breaking a field of
+        one blob would otherwise break the fixture for every case after it --
+        and this whole block rests on each case differing from a known-good
+        blob in exactly one place.
+        """
+        src = new_state(lua, State)
+        feed(src, parser, SHAPE_FIXTURE)
+        return src.serialise(src)
+
+    def broken(path, value):
+        """That blob with one field, named by a dotted path, replaced."""
+        blob = shape_blob()
+        target = blob
+        steps = path.split(".")
+        for step in steps[:-1]:
+            target = target[int(step) if step.isdigit() else step]
+        leaf = steps[-1]
+        target[int(leaf) if leaf.isdigit() else leaf] = value
+        return blob
+
+    def rejects(path, value, what):
+        s = new_state(lua, State)
+        blob = broken(path, value)
+        raised = None
+        accepted = True
+        try:
+            accepted = bool(s.restore(s, blob))
+        except Exception as exc:                    # noqa: BLE001
+            raised = exc
+        left = s.snapshot(s)
+        if raised is not None:
+            why = ("restore() raised instead (%s) -- in game that escapes "
+                   "into an Ashita event handler, which has no protected call "
+                   "around it, and the settings save that would have cleared "
+                   "the unusable blob never happens" % raised)
+        elif accepted:
+            why = "it was accepted and the window drew a run built from it"
+        elif left is not None:
+            why = "it was refused and a half-applied run was left behind"
+        else:
+            why = ""
+        res.check(raised is None and not accepted and left is None,
+                  "a saved session whose %s was not discarded: %s"
+                  % (what, why))
+
+    # The control first: a validator that rejects everything would pass every
+    # case below and cost the player their in-progress run on every reload.
+    control = new_state(lua, State)
+    res.check(bool(control.restore(control, shape_blob())),
+              "a session the addon had just written itself was refused, so a "
+              "reload throws away an in-progress run the server will never "
+              "re-announce")
+    kept = control.snapshot(control)
+    res.check(kept is not None
+              and kept["objective"]["kind"] == "kills"
+              and int(kept["objective"]["count"]) == 20
+              and len(list(kept["objective"]["mobs"].values())) == 3
+              and kept["next_boss"]["name"] == "Orcish Martial"
+              and int(kept["bonus"]["max"]) == 5
+              and len(list(kept["boons"].values())) == 2
+              and int(kept["points"]) == 84
+              and int(kept["phase"]) == 2,
+              "a session the addon wrote itself came back with something "
+              "missing, so the window would resume a run short of what it "
+              "held when it was saved")
+
+    # Every numeric field that reaches arithmetic, one case each.
+    rejects("kills_max", "twenty",
+            "kill cap is the word 'twenty' rather than a number")
+    rejects("objective.count", "twenty",
+            "objective count is a string, so the progress bar divides by it")
+    rejects("bonus.max", "five",
+            "bonus maximum is a string, so the bonus bar divides by it")
+    rejects("bonus.remaining", "soon",
+            "bonus countdown is a string, so the expiry is computed from it")
+    rejects("time_left", "lots",
+            "saved time left is a string, which restore() itself subtracts a "
+            "wall-clock gap from")
+    rejects("elapsed", "ages",
+            "elapsed time is a string, which restore() itself subtracts from "
+            "the clock")
+    rejects("saved_at", "yesterday",
+            "save stamp is a string, which restore() itself subtracts from "
+            "os.time()")
+    rejects("phase", "two", "phase number is a string")
+    rejects("points", "84",
+            "points total is the numeral 84 written as text -- Lua would "
+            "coerce it silently, which is a number the server never sent "
+            "displayed with the same confidence as one it did")
+
+    # The two shapes table.concat and the window disagree about.
+    rejects("objective.mobs.2", 5,
+            "mob list holds a number where a mob's name belongs")
+    rejects("objective.mobs.2", lua.table_from({"name": "Orcish Fodder"}),
+            "mob list holds a nested table where a mob's name belongs")
+    rejects("objective.mobs.tail", "Phantom Mob",
+            "mob list is keyed by something other than its own positions, so "
+            "a name would ride past a length-based loop unseen")
+    rejects("objective.mobs.2", "",
+            "mob list holds a blank name, so the window draws an empty entry")
+
+    # A non-table where a sub-table belongs.
+    rejects("objective", "Defeat 20 enemies", "objective is a bare string")
+    rejects("next_boss", 7, "boss preview is a number")
+    rejects("bonus", "Sentry Lizard 2/5", "bonus is a bare string")
+    rejects("boons", "Ronin's Revenge", "boons list is a bare string")
+    rejects("extra", 6, "extras map is a number")
+
+    # A malformed member of a list fails the whole blob rather than being
+    # skipped. Skipping is a half-apply by definition: the player comes back
+    # to a run showing one of the two boons they picked, with nothing on
+    # screen saying the other was dropped.
+    rejects("boons.2.name", None,
+            "second boon carries no name, which used to be silently skipped "
+            "so the run came back holding one of the two boons picked")
+    rejects("boons.2", 5, "boons list holds a number where a boon belongs")
+    rejects("boons.1.stats", 15, "boon's stats line is a number")
+
+    # Shapes, not contents. The objective's kind is checked for being a
+    # string and never against a list of known kinds: a kind the server adds
+    # later must survive.
+    rejects("objective.kind", 3, "objective kind is a number")
+    rejects("next_boss.name", "", "boss preview has a blank name")
+    rejects("extra.Seals Broken", "2/6",
+            "extras entry is a string rather than a counter")
+    rejects("difficulty", 5, "difficulty is a number")
+    rejects("points_partial", "yes",
+            "points lower-bound marking is a string rather than a flag")
+    rejects("instance", "",
+            "instance name is blank, so the window names no instance at all")
+
+    # A rejection leaves the run the player is actually in alone. It is
+    # neither replaced by a half-built one nor cleared.
+    live = new_state(lua, State)
+    feed(live, parser, SHAPE_FIXTURE)
+    live_phase = int(live.snapshot(live)["phase"])
+    live_points = int(live.snapshot(live)["points"])
+    live_raised = None
+    live_took = True
+    try:
+        live_took = bool(live.restore(live, broken("kills_max", "twenty")))
+    except Exception as exc:                        # noqa: BLE001
+        live_raised = exc
+    res.check(live_raised is None and not live_took,
+              "a malformed session was applied over a run in progress: %s"
+              % (live_raised if live_raised is not None else "accepted",))
+    after = live.snapshot(live)
+    res.check(after is not None
+              and int(after["phase"]) == live_phase
+              and int(after["points"]) == live_points
+              and after["next_boss"] is not None,
+              "a rejected session took the run the player was standing in "
+              "with it -- the window went blank on a live Incursion")
+
+    # The objective and the boss preview are copies, not references into the
+    # decoded blob. A table the addon does not own can be changed under it.
+    src = new_state(lua, State)
+    feed(src, parser, SHAPE_FIXTURE)
+    shared = src.serialise(src)
+    copyist = new_state(lua, State)
+    res.check(bool(copyist.restore(copyist, shared)),
+              "the copy fixture was refused, so nothing below is exercised")
+    shared["objective"]["count"] = 999
+    shared["objective"]["mobs"][1] = "Not A Mob"
+    shared["next_boss"]["name"] = "Not The Boss"
+    copied = copyist.snapshot(copyist)
+    res.check(copied is not None and int(copied["objective"]["count"]) == 20,
+              "the restored objective is the decoded blob's own table: a "
+              "change to the blob moved the count on screen to %s"
+              % (copied["objective"]["count"] if copied else "nothing",))
+    res.check(copied is not None
+              and copied["objective"]["mobs"][1] == "Orcish Grappler",
+              "the restored mob list is the decoded blob's own table: a "
+              "change to the blob renamed a mob on screen")
+    res.check(copied is not None
+              and copied["next_boss"]["name"] == "Orcish Martial",
+              "the restored boss preview is the decoded blob's own table: a "
+              "change to the blob renamed the boss on screen")
+
     lua.globals()["__clock"] = 0
 
     return res
@@ -1942,6 +2154,73 @@ def test_json_roundtrip(lua, parser, State, libs):
               "restore accepted a bad snapshot")
     res.check(s5.snapshot(s5) is None, "rejected restore left state behind")
     res.check(s5.serialise(s5) is None, "serialise of an empty state is not nil")
+
+    # --- HARD-05, through Ashita's own decoder ----------------------------
+
+    # The structural validator's rules are derived from what serialise()
+    # writes, and the only evidence that it accepts everything serialise()
+    # writes is a round trip through the decoder the game actually uses. The
+    # harness's stub is more permissive; a green run against it alone would
+    # not settle this.
+
+    # The thinnest possible run: begun and nothing else. Every optional field
+    # -- objective, next boss, bonus, boons, extras, phase, kill cap, clock --
+    # is absent, and json.lua's own choices about empty tables are whatever
+    # they are. If the validator's absent-or-X arms are wrong anywhere, this
+    # is where a real player loses a run they had only just entered.
+    thin = new_state(lua, State)
+    feed(thin, parser, ["Incursion [Davoi] Begins! (Hard)"])
+    thin_back = new_state(lua, State)
+    res.check(bool(thin_back.restore(thin_back, js.decode(js.encode(thin.serialise(thin))))),
+              "a run the player had only just entered -- no objective, no "
+              "boss, no bonus, no boons -- was thrown away on reload")
+    thin_run = thin_back.snapshot(thin_back)
+    res.check(thin_run is not None
+              and thin_run["instance"] == "Davoi"
+              and thin_run["difficulty"] == "Hard",
+              "a freshly entered run came back without its instance or "
+              "difficulty: %r"
+              % ((thin_run["instance"], thin_run["difficulty"])
+                 if thin_run is not None else None,))
+
+    # And the rejection, through the same decoder: a hand-edited settings
+    # file is well-formed JSON of the wrong shape, which is the exact shape
+    # the harness's own stub cannot prove anything about.
+    bent = js.decode(js.encode(s.serialise(s)))
+    bent["objective"]["count"] = "twenty"
+    s9 = new_state(lua, State)
+    bent_raised = None
+    bent_took = True
+    try:
+        bent_took = bool(s9.restore(s9, bent))
+    except Exception as exc:                        # noqa: BLE001
+        bent_raised = exc
+    res.check(bent_raised is None and not bent_took
+              and s9.snapshot(s9) is None,
+              "a hand-edited session whose objective count is a string was "
+              "not discarded whole: %s"
+              % (bent_raised if bent_raised is not None
+                 else ("accepted" if bent_took else "a run was left behind")))
+
+    # A malformed member of a list, through the same decoder: whole blob
+    # gone, not one boon quietly dropped.
+    nameless = js.decode(js.encode(s.serialise(s)))
+    nameless["boons"][1]["name"] = None
+    s10 = new_state(lua, State)
+    nameless_raised = None
+    nameless_took = True
+    try:
+        nameless_took = bool(s10.restore(s10, nameless))
+    except Exception as exc:                        # noqa: BLE001
+        nameless_raised = exc
+    res.check(nameless_raised is None and not nameless_took
+              and s10.snapshot(s10) is None,
+              "a session holding a boon with no name was half-applied: the "
+              "run came back with the nameless boon quietly skipped rather "
+              "than the session discarded (%s)"
+              % (nameless_raised if nameless_raised is not None
+                 else ("accepted" if nameless_took
+                       else "a run was left behind")))
 
     return res
 
@@ -2868,6 +3147,47 @@ def test_addon_shell():
               "(%d writes)" % corrupt.saves)
     res.check(shell_run(corrupt) is None,
               "an unreadable saved run left a half-built run behind")
+
+    # HARD-05 on the load path. Unreadable is the easy case -- json.decode
+    # says no and the pcall around it catches anything it throws. This is the
+    # hard one: perfectly well-formed JSON of the wrong shape, which is what a
+    # settings file edited by hand or truncated mid-write looks like. Nothing
+    # protects the restore() call itself at either of its two call sites, so
+    # what the shape costs is decided entirely inside state.lua.
+    #
+    # A discarded session is an ordinary outcome, not a fault to report at the
+    # player: the run is gone either way and there is nothing they can do.
+    WRONG_SHAPE = ('{"version":2,"instance":"%s","phase":1,"kills_cur":3,'
+                   '"kills_max":15,"time_left":"lots","elapsed":42,'
+                   '"boons":[],"extra":{}}' % SHELL_INSTANCE)
+
+    bent = None
+    bent_raised = None
+    try:
+        bent = loaded_host(profile={"session": WRONG_SHAPE})
+    except Exception as exc:                        # noqa: BLE001
+        bent_raised = exc
+    res.check(bent_raised is None,
+              "a saved session of the wrong shape took the addon's load "
+              "handler down with it -- in game that error escapes into "
+              "Ashita, and the settings save that clears the unusable string "
+              "never happens, so it fails again on every load: %s"
+              % (bent_raised,))
+    res.check(bent is not None and shell_run(bent) is None,
+              "a saved session of the wrong shape was half-applied into a run")
+    res.check(bent is not None and bent.settings["session"] == "",
+              "an unusable saved session was kept and will be retried on "
+              "every load: %r"
+              % (bent.settings["session"] if bent is not None else None,))
+    res.check(bent is not None and bent.saves == 1,
+              "clearing the unusable saved session was never written to disk "
+              "(%s writes)" % (bent.saves if bent is not None else "no",))
+    bent_noise = ([line for line in bent.chat
+                   if "error" in line.lower() or "Resumed run" in line]
+                  if bent is not None else [])
+    res.check(bent is not None and not bent_noise,
+              "a discarded session was reported at the player as a fault, or "
+              "reported as resumed when it was not: %r" % (bent_noise,))
 
     # --- the player's name, which may not exist yet at load ---------------
 
