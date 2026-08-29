@@ -34,10 +34,27 @@ local function trim(s)
 end
 
 -- 'Orcish Grappler, Orcish Mesmerizer, Orcish Fodder' -> { 'Orcish Grappler', ... }
+--
+-- The separator is comma-space, scanned as plain text, not any comma. A name
+-- carrying its own comma would not have a space after it, so splitting on the
+-- two characters together keeps such a name whole where splitting on the comma
+-- alone would put two mobs in the window that the server never named. All 469
+-- kill-objective lines across 127 logs split identically either way, so this
+-- narrows the rule without changing one line the server has actually sent.
+-- A piece that is empty once trimmed is dropped rather than drawn as a blank.
 local function split_mobs(s)
     local out = {};
-    for name in s:gmatch('[^,]+') do
-        out[#out + 1] = trim(name);
+    local start = 1;
+    while true do
+        local i, j = s:find(', ', start, true);
+        local piece = trim(i and s:sub(start, i - 1) or s:sub(start));
+        if piece ~= '' then
+            out[#out + 1] = piece;
+        end
+        if not i then
+            break;
+        end
+        start = j + 1;
     end
     return out;
 end
@@ -133,16 +150,35 @@ local specific = {
     end,
 
     -- New Objective: Defeat Yagudo Scout at (J-9) (Map #1)!
+    --
+    -- The location is the anchor, not the name. A parenthesised trailing group
+    -- is structurally identifiable; the name is simply whatever precedes it. So
+    -- the precise form below captures the name greedily and requires the
+    -- location to be parenthesised, which puts the split on the *last* ' at '
+    -- rather than the first -- and a name that carries that substring itself
+    -- survives whole instead of being truncated with its tail folded into the
+    -- coordinates. Recognising such a name any other way would mean holding a
+    -- list of names, which is hardcoded content and forbidden outright.
+    --
+    -- If the precise form declines, the shape shipped in 1.1.0 answers
+    -- unchanged, so nothing that reaches the window today can stop reaching it.
     function(s)
-        local name, loc = s:match('^New Objective: Defeat (.-) at (.+)!$');
+        local name, loc = s:match('^New Objective: Defeat (.*) at (%(.+%))!$');
+        if not name then
+            name, loc = s:match('^New Objective: Defeat (.-) at (.+)!$');
+        end
         if name then
             return { t = 'objective_boss', name = trim(name), loc = trim(loc) };
         end
     end,
 
     -- (Boss: Yagudo Scout at (J-9) (Map #1))
+    -- Same shape, same anchor, same fallback as the objective above.
     function(s)
-        local name, loc = s:match('^%(Boss: (.-) at (.+)%)$');
+        local name, loc = s:match('^%(Boss: (.*) at (%(.+%))%)$');
+        if not name then
+            name, loc = s:match('^%(Boss: (.-) at (.+)%)$');
+        end
         if name then
             return { t = 'boss_hint', name = trim(name), loc = trim(loc) };
         end
@@ -172,9 +208,14 @@ local specific = {
     end,
 
     -- Bonus Objective: Defeat Dust Eater at (H-9) (Map #2)! (Expires in 10 Minutes)
+    -- Same shape, same anchor, same fallback as the two boss forms above.
     function(s)
         local name, loc, mins =
-            s:match('^Bonus Objective: Defeat (.-) at (.+)! %(Expires in (%d+) Minutes?%)$');
+            s:match('^Bonus Objective: Defeat (.*) at (%(.+%))! %(Expires in (%d+) Minutes?%)$');
+        if not name then
+            name, loc, mins =
+                s:match('^Bonus Objective: Defeat (.-) at (.+)! %(Expires in (%d+) Minutes?%)$');
+        end
         if name then
             return {
                 t = 'bonus_new', kind = 'nm', label = trim(name), loc = trim(loc),
@@ -200,13 +241,19 @@ local specific = {
     end,
 
     -- Godwen gains the effect of Ronin's Revenge (<glyph>): WS Accuracy+15 / Store TP+8
-    -- A boon chosen between phases. Ordinary buffs ('gains the effect of
-    -- Protect.') have no '(glyph): stats' tail, which is what makes this
-    -- unambiguous. The glyph is a client-side icon code and is discarded.
+    -- A boon chosen between phases. What makes this unambiguous is the tail: a
+    -- parenthesised glyph group that is *not empty*, immediately followed by a
+    -- colon and a space, and then the stats. Ordinary buffs ('gains the effect
+    -- of Protect.') have no such tail. The glyph is a client-side icon code and
+    -- is discarded. The name must be non-blank once trimmed, or there is no
+    -- boon to name and the window would draw an empty row.
     function(s)
-        local who, name, stats = s:match('^(%S+) gains the effect of (.-) %(.-%): (.+)$');
+        local who, name, stats = s:match('^(%S+) gains the effect of (.-) %([^)]+%): (.+)$');
         if who then
-            return { t = 'boon', who = who, name = trim(name), stats = trim(stats) };
+            name = trim(name);
+            if name ~= '' then
+                return { t = 'boon', who = who, name = name, stats = trim(stats) };
+            end
         end
     end,
 };
