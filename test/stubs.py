@@ -78,8 +78,9 @@ local PX_PER_CHAR = 7.0
 
 -- The x a drawing call starts a fresh line at (ImGui's window padding).
 --
--- Deliberately not 8: ui.lua's file default for origin_x is 8 (ui.lua:67) and
--- it is overwritten with GetCursorPosX() inside Begin (ui.lua:408). A stub
+-- Deliberately not 8: ui.lua's file default for origin_x is 8 --
+-- ui.lua (`local origin_x = 8`) -- and it is overwritten with GetCursorPosX()
+-- inside Begin -- ui.lua (`origin_x = imgui.GetCursorPosX()`). A stub
 -- padding of 8 makes that assignment a no-op, so every right-aligned value
 -- and wrap position in every window is identical whether or not the line
 -- runs -- one of render's statements invisible to a suite that claims to
@@ -187,9 +188,10 @@ local function record(name, ...)
 end
 
 --[[
-* Cursor bookkeeping: one number, so right_text's overflow branch at
-* ui.lua:98 is reachable. This is arithmetic, not a layout engine --
-* wrapping, real font metrics and window sizing are explicitly not simulated.
+* Cursor bookkeeping: one number, so right_text's overflow branch --
+* ui.lua (`if target > imgui.GetCursorPosX()`) -- is reachable. This is
+* arithmetic, not a layout engine -- wrapping, real font metrics and window
+* sizing are explicitly not simulated.
 *
 * A drawing call is placed at the cursor, remembers where it ended, and
 * returns the cursor to the padding (ImGui moves to the next line). SameLine
@@ -554,7 +556,8 @@ class ImGuiRecorder:
         """Where the stub puts the cursor at the top of a window.
 
         This is what GetCursorPosX() reports inside Begin, and therefore what
-        ui.lua:408 captures as origin_x -- a test can assert the window took
+        ui.lua (`origin_x = imgui.GetCursorPosX()`) captures as origin_x --
+        a test can assert the window took
         its left edge from ImGui rather than from its own file default.
         """
         return float(self._s["padding"])
@@ -682,8 +685,8 @@ class ImGuiRecorder:
 def install_imgui(lua):
     """Install the recording ImGui stub into `lua` and return its handle.
 
-    Populates package.loaded['imgui'] so require('imgui') at ui.lua:28
-    resolves to it, and sets the ImGui* enum globals ui.render reads.
+    Populates package.loaded['imgui'] so ui.lua (`local imgui =
+    require('imgui')`) resolves to it, and sets the ImGui* enum globals ui.render reads.
     """
     return ImGuiRecorder(lua)
 
@@ -706,7 +709,8 @@ ASHITA_CHUNK = """
 --[[
 * Deterministic clocks. state.lua deliberately mixes two of them with
 * different epochs: the monotonic clock drives every run timer through the
-* now() at inctrack.lua:80 (os.clock resets on reload, so timers serialise as
+* now() -- inctrack.lua (`local function now`) -- (os.clock resets on reload,
+* so timers serialise as
 * remaining durations), while the os.time() wall clock is what `saved_at` and
 * the staleness check in State:restore compare. Both are stubbed, and
 * separately, so a test can age one without the other.
@@ -720,11 +724,13 @@ __host_wall  = 0;
 os.clock = function () return __host_mono; end
 os.time  = function () return __host_wall; end
 
--- The five addon.* assignments at inctrack.lua:20-24 need somewhere to land.
+-- The five addon.* assignments in inctrack.lua (`addon.name`) need somewhere
+-- to land.
 addon = {};
 
 -- Ashita's common.lua prelude table constructor; a passthrough is all the
--- addon asks of it, exactly as suite 8 already does at run_tests.py:842.
+-- addon asks of it, exactly as the persistence suite already does --
+-- run_tests.py (`def test_json_roundtrip`).
 function T(t)
     return t or {};
 end
@@ -742,10 +748,12 @@ ashita = {
 };
 
 --[[
-* AshitaCore:GetMemoryManager():GetParty():GetMemberName(0) -- inctrack.lua:127
-* and :177. These are colon calls, so every method takes its receiver
-* explicitly. The name starts empty so the deferred-fetch path at
-* inctrack.lua:176-181 is exercisable; Python supplies one later.
+* AshitaCore:GetMemoryManager():GetParty():GetMemberName(0) -- inctrack.lua
+* (`GetParty():GetMemberName(0)`), called from the load handler and again
+* from text_in. These are colon calls, so every method takes its receiver
+* explicitly. The name starts empty so the deferred-fetch path --
+* inctrack.lua (`if incursion.state.player == nil then`) -- is exercisable;
+* Python supplies one later.
 ]]--
 __host_player = '';
 
@@ -775,7 +783,7 @@ print = function (...)
     __host_chat[#__host_chat + 1] = table.concat(parts, '\\t');
 end
 
--- require('common') at inctrack.lua:26 is for side effects only.
+-- inctrack.lua (`require('common');`) is for side effects only.
 package.loaded['common'] = {};
 
 package.loaded['chat'] = {
@@ -851,8 +859,8 @@ package.loaded['settings'] = {
     end,
 };
 
--- Fire the profile-switch callback registered at inctrack.lua:281 with a new
--- settings table, as a character change does.
+-- Fire the profile-switch callback -- inctrack.lua (`settings.register(`) --
+-- with a new settings table, as a character change does.
 function __host_switch(over)
     __host_settings = merged(__host_defaults, over);
     if __host_settings_cb ~= nil then
@@ -862,8 +870,8 @@ function __host_switch(over)
 end
 
 --[[
-* string:strip_colors() -- the call inctrack.lua makes on a line the gate let
-* through (`line = line:strip_colors()`).
+* string:strip_colors() -- the call the shell makes on a line the gate let
+* through: inctrack.lua (`line = line:strip_colors()`).
 *
 * Ashita's colour codes are *three* marker bytes -- 0x1E, 0x1F and 0x7F --
 * each followed by one payload byte, and the host strips all three in a
@@ -897,7 +905,8 @@ function __host_require(name)
     return (require(name));
 end
 
--- string:args() -- inctrack.lua:229. '/inc reset' -> { '/inc', 'reset' },
+-- string:args() -- inctrack.lua (`e.command:args()`). '/inc reset' ->
+-- { '/inc', 'reset' },
 -- 1-indexed, so args[1] and args[2] behave as they do in game.
 function string.args(s)
     local out = {};
@@ -1243,7 +1252,8 @@ package.loaded['json'] = json;
 # the host looks at `message_modified` (and `mode_modified`, `indent_modified`)
 # to decide what the player actually sees, and at `blocked` to decide whether
 # they see it at all. An event table carrying only `message` therefore cannot
-# prove the read-only guarantee at inctrack.lua:156 -- a handler that rewrote
+# prove the read-only guarantee inctrack.lua (`Read-only. The message is
+# never modified`) makes -- a handler that rewrote
 # chat in game would leave every assertion about `message` untouched.
 TEXT_IN_FIELDS = {
     "mode": 0,

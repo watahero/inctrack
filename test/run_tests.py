@@ -2988,7 +2988,7 @@ def first_diff(got, want):
 # The six expected windows. Inline rather than golden files on disk, so a
 # change to any draw function shows up as a readable diff in review. Every
 # line of all six was read against the layout mockup in ui.lua's header
-# comment (ui.lua:15-26) before being pasted in.
+# comment -- ui.lua (`Layout is deliberately dense`) -- before being pasted in.
 
 # 1. Mid-phase. The phase bar with its overlay label, the mob line, and the
 #    'Next:' line with a right-aligned location.
@@ -3133,7 +3133,7 @@ PopStyleVar 1
 #    run time replace the instance clock, and the objective, bonus and extras
 #    sections are gone. There is no SetCursorPosX before the value because the
 #    instance and difficulty already run past where it would start -- the
-#    do-not-overprint branch at ui.lua:96-100.
+#    do-not-overprint branch, ui.lua (`if target > imgui.GetCursorPosX()`).
 WINDOW_FINISHED = expected_window("""
 PushStyleVar 13 [4, 2]
 Begin 'inctrack###incursion_window' p_open=nil flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
@@ -3215,8 +3215,9 @@ def test_ui():
     # into the test, because the right-alignment assertions below are stated
     # against origin_x + CONTENT_W and a copy would stop tracking the addon.
     # Read here, before any render call, origin_x is still ui.lua's file
-    # default of 8 (ui.lua:67) -- it is only rewritten inside Begin
-    # (ui.lua:408). That is correct for the direct-call tests in this section,
+    # default of 8 -- ui.lua (`local origin_x = 8`) -- and it is only
+    # rewritten inside Begin, ui.lua (`origin_x = imgui.GetCursorPosX()`).
+    # That is correct for the direct-call tests in this section,
     # which never go through render; the snapshot cases further down do go
     # through Begin and see the stub's cursor instead.
     CONTENT_W = float(L["CONTENT_W"])
@@ -3408,8 +3409,8 @@ def test_ui():
               % (moved and moved[0][0], right_edge - width))
 
     # The left side of the line already runs past where the value would start:
-    # it must sit after the text rather than printing on top of it
-    # (ui.lua:96-100).
+    # it must sit after the text rather than printing on top of it --
+    # ui.lua (`if target > imgui.GetCursorPosX()`).
     rec.reset()
     rec.api.TextColored(COLOR["text"], "x" * 60)
     right_text(label, COLOR["text"])
@@ -3431,7 +3432,7 @@ def test_ui():
               "wrapped text left the wrap position pushed, so every later "
               "line wrapped too")
 
-    # --- STAT_SHORT's ordering contract (ui.lua:286-292) ---
+    # --- STAT_SHORT's ordering contract, ui.lua (`local STAT_SHORT`) ---
 
     # Longer phrases must be listed before their own substrings, or the
     # substring replaces first and the longer phrase can never match whole.
@@ -3484,7 +3485,8 @@ def test_ui():
         # Two drops, because one is not enough to show all four staleness
         # markers at once: a phase message flags the old mob list but also
         # clears the desync, since a kill count is live information
-        # (state.lua:206-224). The second reconnect is what puts the window
+        # -- state.lua (`run.objective.stale = true`). The second reconnect
+        # is what puts the window
         # into 'these mobs are only probable *and* this count is a lower
         # bound' -- exactly the state the player must not mistake for truth.
         ("reconnected", mid_phase + [
@@ -3523,8 +3525,9 @@ def test_ui():
 
     # --- the left edge every right-aligned value is measured from ---------
 
-    # ui.lua declares origin_x = 8 at file scope and overwrites it with
-    # GetCursorPosX() inside Begin (ui.lua:67 and :408). The stub's padding is
+    # ui.lua declares origin_x = 8 at file scope -- ui.lua (`local origin_x
+    # = 8`) -- and overwrites it inside Begin, ui.lua (`origin_x =
+    # imgui.GetCursorPosX()`). The stub's padding is
     # deliberately not 8 (stubs.py), so dropping that line is observable:
     # without this check every window above would be byte-identical whether or
     # not the addon ever asks ImGui where the content starts, and a real
@@ -3808,7 +3811,9 @@ def test_addon_shell():
                   "heading names %r, so the build and the record of what is "
                   "in it disagree" % (version, newest))
 
-    # --- the pcall boundary at inctrack.lua:160 ---------------------------
+    # --- the chat handler's pcall boundary ---------------------------------
+    #
+    # inctrack.lua (`local ok, err = pcall(function ()`).
 
     # Forced from outside rather than by editing the addon: a Lua table as the
     # message. The handler's first real act is a string method call on it,
@@ -3892,8 +3897,9 @@ def test_addon_shell():
     res.check(shell_run(bad) is not None,
               "an unreadable line stopped the handler reading the next one")
 
-    # Read-only on the ordinary path too. This is the guarantee the comment at
-    # inctrack.lua:156 makes and that nothing has tested until now.
+    # Read-only on the ordinary path too. This is the guarantee the comment
+    # inctrack.lua (`Read-only. The message is never modified`) makes, and
+    # that nothing had tested until this phase.
     ordinary = begins()
     e = bad.fire_text_in(ordinary)
     res.check(e["message"] == ordinary,
@@ -4853,9 +4859,10 @@ def test_addon_shell():
               "itself")
 
     # Nothing here arms the recorder's close switch or asserts anything about
-    # the manual-hide branch at inctrack.lua:219-222: that is the ui suite's
-    # one expected failure, and a second entry for the same defect would break
-    # the exactly-three guard in main().
+    # the window's manual show/hide path -- inctrack.lua
+    # (`incursion.override = not visible()`). That belongs to the command
+    # section below and to the ui suite, and a second entry for it here would
+    # say nothing either of them does not already.
 
     # --- an error inside ui.render (HARD-01) --------------------------------
     #
@@ -5393,6 +5400,55 @@ def test_record(parser):
               "result lines, so the sentence above it can be right and the "
               "table still wrong"
               % (rows, functions - 1 + parser_lines))
+
+    # --- every citation in the harness points at something that exists ----
+    #
+    # The harness pins each stub and each fixture to the shipped statement it
+    # models. Good discipline, and the reason the phase's own ledger caught
+    # four drifted citations in a plan -- but the citations were line numbers,
+    # and by the end of the phase thirteen of them had drifted by 40 to 280
+    # lines and pointed at unrelated code. A citation that resolves to the
+    # wrong statement is worse than none: it sends a reader somewhere else
+    # with the confidence of a reference.
+    #
+    # So they are searchable tokens now, in one form -- file (`token`) -- and
+    # this walks every one of them. Moving the cited code is fine; renaming it
+    # without re-anchoring the citation is what fails, which is the drift that
+    # was accumulating silently.
+    # file (`token`), tolerating the hard wrap that puts the file at the end
+    # of one comment line and the token at the start of the next.
+    cite = re.compile(
+        r"(\w+\.(?:lua|py))[ \t]*(?:\n[ \t]*(?:#|\*|--)[ \t]*)?\(`([^`]+)`\)")
+    cited = broken = 0
+    for parts in (("test", "run_tests.py"), ("test", "stubs.py")):
+        source = repo_text(*parts)
+        for target, token in cite.findall(source):
+            cited += 1
+            where = ("inctrack", target) if target.endswith(".lua") \
+                else ("test", target)
+            # These citations sit in hard-wrapped comments, so a token can be
+            # split across lines with a comment marker in the middle of it.
+            # Drop the marker from every continuation line, then match
+            # whitespace-insensitively, because the code being cited may be
+            # wrapped too.
+            words = []
+            for i, line in enumerate(token.splitlines()):
+                if i:
+                    line = re.sub(r"^\s*(#|\*|--)\s*", "", line)
+                words.extend(line.split())
+            loose = r"\s+".join(re.escape(w) for w in words)
+            if re.search(loose, repo_text(*where)) is None:
+                broken += 1
+                res.check(False,
+                          "%s cites %s (`%s`) and %s contains no such text"
+                          % ("/".join(parts), target, " ".join(words),
+                             target))
+    res.check(cited >= 20,
+              "only %d citations were found in the harness, so this check is "
+              "not walking the ones that exist" % cited)
+    res.check(broken == 0,
+              "%d harness citations point at text that is not in the file "
+              "they name" % broken)
 
     return res
 
