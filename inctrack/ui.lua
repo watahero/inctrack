@@ -133,6 +133,23 @@ local function clock_str(seconds)
     return string.format('%d:%02d', m, s);
 end
 
+--[[
+* Ashita's imgui.Text/TextColored treat the string as a printf format --
+* confirmed in game when Adept's Advance ('Haste+5% / Fast Cast+10%')
+* rendered stack garbage where its stats belong. Every dynamic string passes
+* through here before reaching a text call. CalcTextSize is not a format
+* call, so alignment measures the raw text and only the drawn copy is
+* escaped.
+]]--
+local function esc(s)
+    return (tostring(s):gsub('%%', '%%%%'));
+end
+
+-- TextColored for dynamic content, with the format escape applied.
+local function textc(color, s)
+    imgui.TextColored(color, esc(s));
+end
+
 -- Right-align a value on the current line, against the fixed content width.
 local function right_text(text, color)
     imgui.SameLine();
@@ -142,7 +159,7 @@ local function right_text(text, color)
     if target > imgui.GetCursorPosX() then
         imgui.SetCursorPosX(target);
     end
-    imgui.TextColored(color or COLOR.text, text);
+    textc(color or COLOR.text, text);
 end
 
 local function wrapped(text, color)
@@ -150,7 +167,7 @@ local function wrapped(text, color)
     -- inside an auto-resizing window the live edge is derived from the very
     -- text being wrapped, which is circular.
     imgui.PushTextWrapPos(origin_x + CONTENT_W);
-    imgui.TextColored(color or COLOR.dim, text);
+    textc(color or COLOR.dim, text);
     imgui.PopTextWrapPos();
 end
 
@@ -178,10 +195,10 @@ end
 
 -- Instance, difficulty, and the instance clock on one line.
 local function draw_header(state, run)
-    imgui.TextColored(COLOR.instance, run.instance or 'Incursion');
+    textc(COLOR.instance, run.instance or 'Incursion');
     if run.difficulty then
         imgui.SameLine();
-        imgui.TextColored(COLOR.dim, '. ' .. run.difficulty);
+        textc(COLOR.dim, '. ' .. run.difficulty);
     end
 
     if run.finished then
@@ -254,7 +271,7 @@ local function draw_objective(run)
     if run.next_boss then
         imgui.TextColored(COLOR.dim, 'Next: ');
         imgui.SameLine();
-        imgui.TextColored(COLOR.text, run.next_boss.name);
+        textc(COLOR.text, run.next_boss.name);
         if run.next_boss.loc then
             right_text(run.next_boss.loc, COLOR.dim);
         end
@@ -281,7 +298,7 @@ local function draw_bonus(state, run)
 
     imgui.TextColored(COLOR.bonus, 'BONUS ');
     imgui.SameLine();
-    imgui.TextColored(COLOR.text, label);
+    textc(COLOR.text, label);
 
     local remaining = state:bonus_remaining();
     if remaining then
@@ -304,7 +321,7 @@ local function draw_extra(state, run)
         local entry = list[i];
         local done = entry.done or (entry.max and entry.cur and entry.cur >= entry.max);
 
-        imgui.TextColored(done and COLOR.good or COLOR.dim, entry.label);
+        textc(done and COLOR.good or COLOR.dim, entry.label);
 
         if entry.max and entry.max > 0 then
             right_text(string.format('%d/%d', entry.cur or 0, entry.max),
@@ -456,7 +473,7 @@ local function draw_boons(run)
     end
 
     for i = 1, #boons do
-        imgui.TextColored(COLOR.boon, boons[i].name);
+        textc(COLOR.boon, boons[i].name);
         if boons[i].stats then
             right_text(shorten(boons[i].stats), COLOR.dim);
         end
