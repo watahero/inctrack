@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.1 — 2026-09-13
+
+Two fixes, both visible on screen.
+
+- The window has its title bar gone and fits itself to its content again.
+  Both had been requested since 1.1.0 and were silently lost in 1.2.0:
+  Ashita's Begin stops reading arguments at an explicit nil, so every
+  window flag — no title bar, auto-resize, no scrollbar, the lock's
+  no-move — was dropped. The call now uses the form every working addon
+  uses, and the flags arrive.
+- A Skirmish window now takes itself down: ten minutes without a Skirmish
+  line — the mode has no completion message; the chest pays out in plain
+  loot lines — and it hides. A late Skirmish line brings it back, and a
+  new run replaces it outright, as before.
+
 ## 1.3.0 — 2026-09-13
 
 The Allied Skirmish is tracked.
