@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.3 — 2026-09-13
+
+One fix, for a window that could spend a whole phase without its mob list.
+
+- If the addon came up mid-run with nothing to resume, the next phase's
+  objective announcement arrived before any line naming the instance — and
+  was dropped, leaving a kill counter with no mobs under it until the phase
+  after. The objective, boss and bonus announcements now open the run
+  themselves; the instance name is filled in by the next line that carries
+  it, and the clock picks up the timer sync from moments before.
+
 ## 1.2.2 — 2026-09-13
 
 One fix, visible the first time a boon carries a percent sign.
