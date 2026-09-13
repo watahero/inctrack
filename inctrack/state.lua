@@ -32,6 +32,19 @@ local LINGER_SECONDS = 30;
 -- An unrecognised Incursion line is shown for this long, then drops off.
 local NOTE_SECONDS = 30;
 
+--[[
+* Events that open a run when none exists, though they name no instance. Each
+* is a line the server only ever sends inside an Incursion; the run they open
+* is unnamed until the first instance-tagged line supplies the name.
+]]--
+local BOOTSTRAP_KINDS = {
+    objective_kills = true,
+    objective_boss  = true,
+    objective_text  = true,
+    boss_hint       = true,
+    bonus_new       = true,
+};
+
 function State.new(opts)
     opts = opts or {};
     local self = setmetatable({}, State);
@@ -171,10 +184,24 @@ function State:apply(e)
     end
 
     -- Everything below needs a run. Any instance-tagged message can arrive
-    -- without one (addon loaded mid-run), so bootstrap from it.
-    if not self.run and e.instance then
+    -- without one (addon loaded mid-run), so bootstrap from it -- and so can
+    -- the objective, boss and bonus announcements, which the server only
+    -- ever sends inside an Incursion but which name no instance. Those open
+    -- an *unnamed* run: dropping one costs the window its mob list for the
+    -- whole phase (seen in the field, 2026-09-13), while holding it costs
+    -- nothing but waiting for the next instance-tagged line to supply the
+    -- name. A points award or a timer sync is deliberately not enough: both
+    -- say an Incursion exists, neither says anything worth showing.
+    if not self.run and (e.instance or BOOTSTRAP_KINDS[t]) then
         self.run = new_run(self, e.instance, nil);
         self.run.recovered = true;
+        -- The same moment Begins! handles: a timer sync held seconds ago
+        -- belongs to the run we just discovered we are inside.
+        if self.pending_time and (self:now() - self.pending_time.at) <= 30 then
+            self.run.time_left = self.pending_time.seconds;
+            self.run.time_sync = self.pending_time.at;
+            self.pending_time = nil;
+        end
     end
 
     local run = self.run;
@@ -187,6 +214,13 @@ function State:apply(e)
     -- activity into a result that is already settled.
     if run.finished and run.hide_at and self:now() > run.hide_at then
         return false;
+    end
+
+    -- A run opened by an unnamed announcement takes its name from the first
+    -- instance-tagged line to arrive. Adoption, not the reset below: a reset
+    -- here would throw away the very objective the bootstrap above was for.
+    if e.instance and run.instance == nil then
+        run.instance = e.instance;
     end
 
     -- An instance-tagged message naming a different instance means our run is
@@ -547,6 +581,14 @@ end
 function State:serialise()
     local run = self.run;
     if not run then
+        return nil;
+    end
+
+    -- A run still waiting for its name is display-only. Its blob could not
+    -- pass restore's gates, so persisting one would greet the next load with
+    -- 'Saved run could not be resumed' for a run that was never worth
+    -- resuming; the name arrives seconds later and persistence starts then.
+    if not run.instance then
         return nil;
     end
 
