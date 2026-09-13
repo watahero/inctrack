@@ -2069,6 +2069,101 @@ def test_state_units(lua, parser, State):
 
     lua.globals()["__clock"] = 0
 
+    # An objective announced while no run exists. Seen in the field on
+    # 2026-09-13 (Godwen_2026.09.13.log, 17:11:51-17:13:48): a mid-run load
+    # had nothing to resume, phase 5's announcement arrived before any
+    # instance-tagged line, and the window spent the whole phase showing a
+    # kill counter with no mob list. 'New Objective:', '(Boss:' and
+    # 'Bonus Objective:' only ever occur inside an Incursion, so they carry
+    # enough certainty to open a run -- what they lack is its name, which the
+    # next instance-tagged line supplies. Naming must be adoption, not the
+    # foreign-instance reset: a reset here throws away the very objective
+    # this bootstrap exists to keep.
+    b1 = new_state(lua, State)
+    feed(b1, parser, [
+        "You have 48 minutes remaining inside this Incursion.",
+        "New Objective: Defeat 10 enemies (Burrowing Pika, Cinder Newt, Magma Crab)",
+        "(Boss: Scalehide at (G-6))",
+    ])
+    run = b1.snapshot(b1)
+    res.check(run is not None,
+              "an objective the server only sends inside an Incursion was "
+              "dropped for want of a run to hold it")
+    res.check(run is not None and run["instance"] is None,
+              "a run bootstrapped from an unnamed line invented an instance "
+              "name: %r" % (run and run["instance"],))
+    res.check(run is not None and bool(run["recovered"]),
+              "a run opened mid-Incursion was not marked recovered")
+    res.check(run is not None and run["objective"] is not None
+              and len(list(run["objective"]["mobs"].values())) == 3,
+              "the mob list that prompted the bootstrap did not survive it")
+    res.check(run is not None and run["next_boss"] is not None
+              and run["next_boss"]["name"] == "Scalehide",
+              "the boss preview that followed the bootstrap was lost")
+    tl = b1.time_left(b1)
+    res.check(tl is not None and int(tl) == 48 * 60,
+              "the held timer sync was not taken up by the bootstrap: %r "
+              "-- Begins! consumes it, and this is the same moment" % tl)
+
+    feed(b1, parser, ["Incursion [Dangruf Wadi] Phase #5 1/10"])
+    run = b1.snapshot(b1)
+    res.check(run["instance"] == "Dangruf Wadi",
+              "the first instance-tagged line did not name the unnamed run")
+    res.check(run["objective"] is not None
+              and len(list(run["objective"]["mobs"].values())) == 3,
+              "naming the run cost it the objective the bootstrap was for")
+    res.check(int(run["kills_cur"]) == 1 and int(run["phase"]) == 5,
+              "the naming phase line's own progress was not applied")
+
+    # A named run meeting a different instance still resets -- adoption is
+    # only for a run that has no name yet.
+    feed(b1, parser, ["Incursion [Fort Ghelsba] Phase #1 3/20"])
+    run = b1.snapshot(b1)
+    res.check(run["instance"] == "Fort Ghelsba"
+              and run["objective"] is None,
+              "the foreign-instance reset stopped working once adoption "
+              "existed: %r" % (run["instance"],))
+
+    # A bonus announcement is Incursion-only too, and can be the first line
+    # a freshly loaded addon sees mid-run.
+    b2 = new_state(lua, State)
+    feed(b2, parser, [
+        "Bonus Objective: Defeat 5 Sentry Lizard! (Expires in 10 Minutes)",
+    ])
+    run = b2.snapshot(b2)
+    res.check(run is not None and run["bonus"] is not None
+              and run["bonus"]["label"] == "Sentry Lizard",
+              "a bonus with no run to hold it was dropped rather than "
+              "opening one")
+
+    # An unnamed run is display-only until it is named: a persisted blob
+    # without an instance cannot pass restore's gates, so writing one would
+    # greet the next load with 'Saved run could not be resumed' for a run
+    # that was never worth resuming. serialise declines instead.
+    b3 = new_state(lua, State)
+    feed(b3, parser, [
+        "New Objective: Defeat 10 enemies (Burrowing Pika, Cinder Newt, Magma Crab)",
+    ])
+    res.check(b3.serialise(b3) is None,
+              "an unnamed bootstrapped run was serialised, and its blob is "
+              "one restore can only refuse -- aloud")
+    feed(b3, parser, ["Incursion [Dangruf Wadi] Phase #5 2/10"])
+    blob = b3.serialise(b3)
+    res.check(blob is not None and blob["instance"] == "Dangruf Wadi",
+              "a named run stopped being persisted")
+
+    # Ordinary chat is still ordinary: nothing here opens a run.
+    b4 = new_state(lua, State)
+    feed(b4, parser, [
+        "You have 48 minutes remaining inside this Incursion.",
+        "Godwen gains 72 incursion points.",
+    ])
+    res.check(b4.snapshot(b4) is None,
+              "a timer sync or a points award opened a run on its own -- "
+              "neither says enough about what to show")
+
+    lua.globals()["__clock"] = 0
+
     return res
 
 
