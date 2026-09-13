@@ -132,6 +132,9 @@ MUST_PARSE = re.compile(
     r"|You have \d+ minutes? remaining inside this Incursion\.$"
     r"|\S+ gains \d+ incursion points\.$"
     r"|\S+ gains the effect of .+ \(.*\): .+"
+    r"|Allied Skirmish"
+    r"|Defeat the following targets then advance to the Skirmish Point"
+    r"|\s*\S+ Quarter \(\d+\): "
     r")"
 )
 
@@ -2161,6 +2164,104 @@ def test_state_units(lua, parser, State):
     res.check(b4.snapshot(b4) is None,
               "a timer sync or a points award opened a run on its own -- "
               "neither says enough about what to show")
+
+    # The Allied Skirmish, the mode the addon never saw. In the corpus since
+    # May and pointed out by the player on 2026-09-13: nothing in it says
+    # 'Incursion [', so every line of it died at the gate. The fixture below
+    # is the real 2026-09-06 session, line for line: four quarters cleared in
+    # parallel, progress lines that identify their quarter only by its mob
+    # list, and no completion message at all -- the mode ends in a loot burst.
+    sk = new_state(lua, State)
+    feed(sk, parser, ["Allied Skirmish has begun!"])
+    run = sk.snapshot(sk)
+    res.check(run is not None, "the Skirmish opening line opened no run")
+    res.check(run is not None and run["difficulty"] == "Skirmish",
+              "a Skirmish run does not say it is one: the header would read "
+              "like an ordinary Incursion")
+
+    feed(sk, parser, [
+        "Defeat the following targets then advance to the Skirmish Point at (H-8) Map #2:",
+        " Orcish Quarter (10): Orcish Trooper, Orcish Gladiator, Orcish Footsoldier, Orcish Bowshooter",
+        " Yagudo Quarter (10): Yagudo Conquistador, Yagudo Lutenist, Yagudo Prior, Yagudo Zealot",
+        " Quadav Quarter (10): Iron Quadav, Spinel Quadav, Elder Quadav, Emerald Quadav",
+        " Goblin Quarter (10): Goblin Robber, Goblin Poacher, Goblin Reaper, Goblin Trader",
+    ])
+    run = sk.snapshot(sk)
+    res.check(run is not None and run["objective"] is not None
+              and run["objective"]["kind"] == "text"
+              and "(H-8) Map #2" in run["objective"]["text"],
+              "the Skirmish Point destination is not on the objective line: "
+              "%r" % (run and run["objective"] and run["objective"]["text"],))
+    quarters = extra_of(sk)
+    res.check(set(quarters) == {"Orcish Quarter", "Yagudo Quarter",
+                                "Quadav Quarter", "Goblin Quarter"},
+              "the four quarters did not become four counters: %r"
+              % sorted(quarters))
+    res.check(all(v == (0, 10, False) for v in quarters.values()),
+              "a quarter did not start at 0/10: %r" % quarters)
+
+    # Progress names the instance -- the adoption path -- and names its
+    # quarter only by the mob list.
+    feed(sk, parser, [
+        "Allied Skirmish [Castle Zvahl Baileys] 3/10 (Iron Quadav, Spinel Quadav, Elder Quadav, Emerald Quadav)",
+        "Allied Skirmish [Castle Zvahl Baileys] 1/10 (Goblin Robber, Goblin Poacher, Goblin Reaper, Goblin Trader)",
+    ])
+    run = sk.snapshot(sk)
+    res.check(run is not None and run["instance"] == "Castle Zvahl Baileys",
+              "the progress line did not name the run")
+    quarters = extra_of(sk)
+    res.check(quarters.get("Quadav Quarter") == (3, 10, False)
+              and quarters.get("Goblin Quarter") == (1, 10, False)
+              and quarters.get("Orcish Quarter") == (0, 10, False),
+              "progress did not land on the quarter its mob list names: %r"
+              % quarters)
+
+    feed(sk, parser, [
+        "Allied Skirmish [Castle Zvahl Baileys] 10/10 (Iron Quadav, Spinel Quadav, Elder Quadav, Emerald Quadav)",
+        "Allied Skirmish [Castle Zvahl Baileys] Group #2 completed!",
+    ])
+    quarters = extra_of(sk)
+    res.check(quarters.get("Quadav Quarter") == (10, 10, True),
+              "a finished quarter is not marked done: %r" % quarters)
+    res.check(sk.note(sk) == "Group #2 completed!",
+              "the group completion was not surfaced: %r" % sk.note(sk))
+
+    feed(sk, parser, [
+        "Allied Skirmish [Castle Zvahl Baileys] Phase completed! Proceed to (H-8) Map #2",
+    ])
+    run = sk.snapshot(sk)
+    res.check(run is not None and run["objective"] is not None
+              and run["objective"]["kind"] == "text"
+              and run["objective"]["text"].startswith("Phase completed!"),
+              "the phase completion did not replace the objective: %r"
+              % (run and run["objective"] and run["objective"]["text"],))
+
+    # A progress line with no setup behind it -- the addon loaded mid-mode.
+    # The quarter's name is unknowable, so the first mob names the counter
+    # rather than the count being dropped.
+    sk2 = new_state(lua, State)
+    feed(sk2, parser, [
+        "Allied Skirmish [Castle Zvahl Baileys] 4/10 (Orcish Trooper, Orcish Gladiator, Orcish Footsoldier, Orcish Bowshooter)",
+    ])
+    run = sk2.snapshot(sk2)
+    res.check(run is not None and run["instance"] == "Castle Zvahl Baileys"
+              and run["difficulty"] == "Skirmish",
+              "a mid-mode load did not bootstrap a Skirmish run")
+    res.check(extra_of(sk2).get("Orcish Trooper") == (4, 10, False),
+              "a quarter seen only through its progress line was dropped: %r"
+              % extra_of(sk2))
+
+    # A Skirmish beginning replaces whatever run came before it, exactly as
+    # Begins! does -- the player has moved on.
+    sk3 = new_state(lua, State)
+    feed(sk3, parser, [
+        "Incursion [Fort Ghelsba] Begins! (Normal)",
+        "Allied Skirmish has begun!",
+    ])
+    run = sk3.snapshot(sk3)
+    res.check(run is not None and run["difficulty"] == "Skirmish"
+              and run["instance"] is None,
+              "a Skirmish beginning did not open its own run")
 
     lua.globals()["__clock"] = 0
 
