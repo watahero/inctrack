@@ -86,6 +86,11 @@ finishes.
 
 The window has no title bar; drag it by its body (`/incursion lock` to pin it).
 
+**Allied Skirmish** is tracked too: the four quarters become four labelled
+progress bars, the Skirmish Point destination sits on the objective line, and
+the header reads `Skirmish` where the difficulty usually goes. The mode has no
+completion message of its own, so the window stays until the next run begins.
+
 Phase totals are deliberately not shown — the count varies by instance and the
 chat stream never states it. Loot is not tracked; it lands in your inventory
 anyway.

@@ -51,6 +51,12 @@ and 2,951,129 chat lines, as re-measured on 2026-08-29.
 | `Incursion [Fort Ghelsba] Bonus Objective: Sentry Lizard 2/5` | Bonus progress. |
 | `Incursion [Fort Ghelsba] Bonus Objective Complete!` | Bonus done. |
 | `Incursion [Fort Ghelsba] Complete! (Normal) Time: 48m 44s` | Run over. |
+| `Allied Skirmish has begun!` | Skirmish mode start. Names no instance; the progress lines do. Replaces any previous run, as `Begins!` does. |
+| `Defeat the following targets then advance to the Skirmish Point at (H-8) Map #2:` | Skirmish objective; the destination becomes the objective text. |
+| ` Orcish Quarter (10): Orcish Trooper, ...` | One of four groups in the opening listing (leading space in the raw line). Each becomes a labelled counter. |
+| `Allied Skirmish [Castle Zvahl Baileys] 3/10 (Iron Quadav, ...)` | Quarter progress. The quarter is identified only by its mob list; a load that missed the listing names it by the first mob. Instance-tagged, so it names a bootstrapped run. |
+| `Allied Skirmish [Castle Zvahl Baileys] Group #2 completed!` | Surfaced as the transient note line. |
+| `Allied Skirmish [Castle Zvahl Baileys] Phase completed! Proceed to (H-8) Map #2` | Replaces the objective text. No completion message follows — the mode ends in a loot burst. |
 | `Godwen gains the effect of Ronin's Revenge (<glyph>): WS Accuracy+15 / Store TP+8` | Boon picked between phases. What separates it from an ordinary buff (`gains the effect of Protect.`) is the tail — a parenthesised group, a colon, a space, then stats — **plus a name that is not blank once trimmed**. The glyph group may be **empty**: a server data table with an unset icon field renders `()` through the same template, and a boon dropped there is dropped for good, because the server never announces one twice. The glyph itself is a client-side icon code and is discarded. Not re-announced on recovery. |
 
 ## Architecture

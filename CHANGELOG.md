@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.3.0 — 2026-09-13
+
+The Allied Skirmish is tracked.
+
+- The Skirmish mode never said `Incursion [`, so the addon ignored it
+  entirely. The window now shows it like any run: the four quarters as
+  labelled progress bars in a stable order, the Skirmish Point destination
+  as the objective, group and phase completions as they land, and
+  `Skirmish` in the header where the difficulty usually sits. A mid-mode
+  load names a quarter by its first mob until the full listing is seen
+  again. The mode has no completion message — the window stays until the
+  next run begins or `/incursion reset`.
+
 ## 1.2.3 — 2026-09-13
 
 One fix, for a window that could spend a whole phase without its mob list.
