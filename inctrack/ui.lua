@@ -518,16 +518,15 @@ function ui.render(state, opts)
 
     imgui.PushStyleVar(ImGuiStyleVar_ItemSpacing, ARG_PAD_TIGHT);
 
-    -- Explicit nil for p_open. Ashita's binding is declared once and
-    -- positionally -- Begin(const char* name, bool* p_open, ImGuiWindowFlags
-    -- flags), plugins/sdk/imgui.h:305 -- and addons/libs/imgui.lua adds no
-    -- wrapper of its own: it is a constants table whose __index is
-    -- AshitaCore:GetGuiManager(), so this call reaches that signature
-    -- unmediated. Flags must therefore go in slot 3. Passing nil is not the
-    -- same as passing a box and ignoring it: it asks for no close control at
-    -- all, which is what this window wants -- it is drawn without a title
-    -- bar, so there is nowhere for one to appear.
-    if imgui.Begin('inctrack###incursion_window', nil, flags) then
+    -- Boolean true for p_open, settled in the field: with an explicit nil
+    -- here the window came back in game with a title bar and a fixed size
+    -- (2026-09-13) -- the binding dropped everything after the nil, and the
+    -- flags in slot 3 never arrived. Every working addon in this install
+    -- passes true here, and that form demonstrably delivers the flags. True
+    -- is a value, not a box, so there is still no close control for the
+    -- host to write a click into -- which suits a window drawn without the
+    -- title bar a close box would need.
+    if imgui.Begin('inctrack###incursion_window', true, flags) then
         origin_x = imgui.GetCursorPosX();
         imgui.Dummy(ARG_SPACER);   -- pins the content width to CONTENT_W
 
