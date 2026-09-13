@@ -33,6 +33,16 @@ local LINGER_SECONDS = 30;
 local NOTE_SECONDS = 30;
 
 --[[
+* A Skirmish this long without a Skirmish line is over. The mode has no
+* completion message -- it ends at the reward chest, which pays out through
+* ordinary 'You obtain ...!' lines, or in a wipe that says nothing -- and the
+* Skirmish Point fight after the last phase line was observed to run about
+* four silent minutes, so ten covers a long one. The next run beginning
+* replaces the window outright either way.
+]]--
+local SKIRMISH_IDLE_SECONDS = 10 * 60;
+
+--[[
 * Events that open a run when none exists, though they name no instance. Each
 * is a line the server only ever sends inside an Incursion; the run they open
 * is unnamed until the first instance-tagged line supplies the name.
@@ -124,6 +134,14 @@ function State:desync()
     end
 end
 
+-- Every Skirmish line marks the run as the Skirmish mode and restarts its
+-- quiet-time clock; the idle rule in should_show reads both.
+local function skirmish_touch(self, run)
+    run.skirmish = true;
+    run.difficulty = run.difficulty or 'Skirmish';
+    run.last_skirmish_at = self:now();
+end
+
 -- Fresh authoritative information has arrived: we are in step again.
 local function resync(run)
     run.desynced = false;
@@ -163,6 +181,7 @@ function State:apply(e)
     if t == 'skirmish_begin' then
         self.run = new_run(self, nil, 'Skirmish');
         self.run.objective = { kind = 'text', text = 'Allied Skirmish' };
+        skirmish_touch(self, self.run);
         self.pending_time = nil;
         return true;
     end
@@ -452,7 +471,7 @@ function State:apply(e)
     -- to handle: the mode ends in a loot burst, and the run is replaced by
     -- whatever begins next.
     if t == 'skirmish_target' then
-        run.difficulty = run.difficulty or 'Skirmish';
+        skirmish_touch(self, run);
         run.objective = {
             kind = 'text',
             text = 'Clear every quarter, then the Skirmish Point at ' .. e.loc,
@@ -463,7 +482,7 @@ function State:apply(e)
     end
 
     if t == 'skirmish_quarter' then
-        run.difficulty = run.difficulty or 'Skirmish';
+        skirmish_touch(self, run);
         run.skirmish_groups = run.skirmish_groups or {};
         run.skirmish_groups[table.concat(e.mobs, ','):lower()] = e.label;
         local entry = run.extra[e.label];
@@ -477,7 +496,7 @@ function State:apply(e)
     end
 
     if t == 'skirmish_progress' then
-        run.difficulty = run.difficulty or 'Skirmish';
+        skirmish_touch(self, run);
         local label = run.skirmish_groups
             and run.skirmish_groups[table.concat(e.mobs, ','):lower()]
             or e.mobs[1] or 'Skirmish';
@@ -494,11 +513,13 @@ function State:apply(e)
     end
 
     if t == 'skirmish_group_done' then
+        skirmish_touch(self, run);
         run.note = { text = 'Group #' .. e.group .. ' completed!', at = self:now() };
         return true;
     end
 
     if t == 'skirmish_phase_done' then
+        skirmish_touch(self, run);
         run.objective = { kind = 'text', text = 'Phase completed! ' .. e.text };
         run.note = nil;
         return true;
@@ -643,6 +664,13 @@ function State:should_show()
     if run.finished then
         return run.hide_at ~= nil and self:now() < run.hide_at;
     end
+    -- The Skirmish's quiet-time rule: the mode has no completion message,
+    -- so ten minutes without a Skirmish line is taken as the end. A late
+    -- line restarts the clock and the window comes back on its own.
+    if run.skirmish and run.last_skirmish_at
+        and (self:now() - run.last_skirmish_at) > SKIRMISH_IDLE_SECONDS then
+        return false;
+    end
     return true;
 end
 
@@ -712,6 +740,14 @@ function State:serialise()
             done      = run.bonus.done,
             remaining = self:bonus_remaining(),
         };
+    end
+
+    if run.skirmish then
+        out.skirmish = true;
+        -- Stored as a duration, like the other clocks: the monotonic clock
+        -- restarts with the addon, and the reload gap is added back on
+        -- restore so time away counts as quiet time.
+        out.skirmish_idle = self:now() - (run.last_skirmish_at or run.started);
     end
 
     for labelText, entry in pairs(run.extra) do
@@ -951,6 +987,7 @@ local function valid_session(data)
         and opt_number(data.elapsed) and opt_number(data.time_left)
         and opt_number(data.saved_at)
         and opt_boolean(data.finished) and opt_boolean(data.points_partial)
+        and opt_boolean(data.skirmish) and opt_number(data.skirmish_idle)
         and valid_objective(data.objective)
         and valid_next_boss(data.next_boss)
         and valid_bonus(data.bonus)
@@ -1123,6 +1160,17 @@ function State:restore(data)
     -- is a half-apply by definition: the run came back holding one of the two
     -- boons the player picked, with nothing on screen saying the other was
     -- dropped. A malformed entry has already failed the whole blob above.
+    if data.skirmish then
+        run.skirmish = true;
+        local idle = finite(data.skirmish_idle) or 0;
+        if idle < 0 then
+            idle = 0;
+        end
+        -- The reload gap counts as quiet time: nothing the mode said while
+        -- we were away was heard, which is exactly what the idle rule asks.
+        run.last_skirmish_at = now - idle - gap;
+    end
+
     if data.boons then
         for i = 1, #data.boons do
             local b = data.boons[i];
