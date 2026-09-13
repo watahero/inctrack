@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.2 — 2026-09-13
+
+One fix, visible the first time a boon carries a percent sign.
+
+- A boon stat with a percent sign — Haste+5%, FC+10%, DT-15% — rendered as
+  garbage numbers after the sign. Ashita's ImGui text calls treat drawn text
+  as a printf format, so the percent read stack values into the window.
+  Everything the server sends is now escaped on its way into a draw call;
+  what you see is what the message said.
+
 ## 1.2.1 — 2026-08-29
 
 Three fixes on the path that writes your run to disk. Two of them could lose a
