@@ -3470,7 +3470,7 @@ Begin 'inctrack###incursion_window' p_open=nil flags=AlwaysAutoResize|NoFocusOnA
   TextColored boon 'Hivewarden's Guard'
   SameLine
   SetCursorPosX 220
-  TextColored dim 'VIT+10 DT-15%'
+  TextColored dim 'VIT+10 DT-15%%'
 End
 PopStyleVar 1
 """)
@@ -3531,15 +3531,18 @@ PopStyleVar 1
 """)
 
 # 6. A percent sign in server-supplied text, in an instance name and in a boon
-#    stat string. This asserts the harness records displayed text verbatim and
-#    never treats it as a format string (T-01-03). It is a statement about the
-#    recorder, not a claim that the real ImGui binding is safe -- that is
-#    HARD-01 in Phase 3 and is deliberately not attempted here.
+#    stat string. The hazard the earlier phases could only model is now
+#    confirmed in game: Ashita's text calls treat the string as a printf
+#    format, and Adept's Advance ('Haste+5% / Fast Cast+10%') rendered stack
+#    garbage. So ui.lua escapes every dynamic string at the draw boundary --
+#    '%' becomes '%%' in what TextColored receives -- and this snapshot pins
+#    that. Alignment is measured on the raw text (CalcTextSize is not a
+#    format call), which is why the SetCursorPosX values are unchanged.
 WINDOW_PERCENT = expected_window("""
 PushStyleVar 13 [4, 2]
 Begin 'inctrack###incursion_window' p_open=nil flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
-  TextColored instance 'Vault 50% Sealed'
+  TextColored instance 'Vault 50%% Sealed'
   SameLine
   TextColored dim '. Normal'
   SameLine
@@ -3555,7 +3558,7 @@ Begin 'inctrack###incursion_window' p_open=nil flags=AlwaysAutoResize|NoFocusOnA
   TextColored boon 'Sealbreaker's Gift'
   SameLine
   SetCursorPosX 206
-  TextColored dim 'DT-15% Cure+10%'
+  TextColored dim 'DT-15%% Cure+10%%'
 End
 PopStyleVar 1
 """)
@@ -4172,10 +4175,11 @@ SHELL_OTHER = "Hivewarden Vaults"
 SHELL_BOON = ("%s gains the effect of Warden's Vigil (X): "
               "WS Accuracy+15 / Store TP+8" % PLAYER)
 
-# An instance name holding a percent sign. Server text is quoted through to
-# the window verbatim, so a name like this reaches a draw call unescaped --
-# the second of the two triggers the phase brief names.
+# An instance name holding a percent sign. ui.lua escapes it at the draw
+# boundary ('%' -> '%%'), so what reaches TextColored is the escaped form --
+# the fault below is armed on that, since it is the string the binding sees.
 SHELL_PERCENT = "Vault of 100% Ruin"
+SHELL_PERCENT_DRAWN = SHELL_PERCENT.replace("%", "%%")
 
 # A kill objective, so a mob list exists to poison. Invented names in the
 # server's established wording, as everything else in this suite is.
@@ -5794,7 +5798,7 @@ def test_addon_shell():
 
     chat_before = len(pct.chat)
     pct.imgui.reset()
-    pct.imgui.arm_fault("TextColored", contains=SHELL_PERCENT)
+    pct.imgui.arm_fault("TextColored", contains=SHELL_PERCENT_DRAWN)
     escaped = one_frame(pct)
     balance = pct.imgui.balance()
 
