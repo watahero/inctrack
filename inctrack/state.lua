@@ -43,6 +43,11 @@ local BOOTSTRAP_KINDS = {
     objective_text  = true,
     boss_hint       = true,
     bonus_new       = true,
+    -- The Skirmish setup lines, for a load that lands mid-listing; the
+    -- instance-tagged Skirmish lines bootstrap the way every tagged line
+    -- does. skirmish_begin has its own arm, like 'begin'.
+    skirmish_target  = true,
+    skirmish_quarter = true,
 };
 
 function State.new(opts)
@@ -147,6 +152,17 @@ function State:apply(e)
             self.run.time_left = self.pending_time.seconds;
             self.run.time_sync = self.pending_time.at;
         end
+        self.pending_time = nil;
+        return true;
+    end
+
+    -- Allied Skirmish has begun! -- a mode start, so it replaces whatever
+    -- run came before it, exactly as Begins! does. The line names no
+    -- instance (the progress lines do), and the mode has no instance clock,
+    -- so a held Incursion sync from moments before belongs to nothing now.
+    if t == 'skirmish_begin' then
+        self.run = new_run(self, nil, 'Skirmish');
+        self.run.objective = { kind = 'text', text = 'Allied Skirmish' };
         self.pending_time = nil;
         return true;
     end
@@ -425,6 +441,66 @@ function State:apply(e)
             end
         end
         run.boons[#run.boons + 1] = { name = e.name, stats = e.stats };
+        return true;
+    end
+
+    -- The Skirmish mode's own lines. The mode borrows the machinery the
+    -- window already has: the destination is the objective text, and the
+    -- four quarters are labelled counters -- the same 'extra' shelf the
+    -- generic tier fills -- keyed by the mob list, which is the only name a
+    -- progress line ever gives its quarter. There is no completion message
+    -- to handle: the mode ends in a loot burst, and the run is replaced by
+    -- whatever begins next.
+    if t == 'skirmish_target' then
+        run.difficulty = run.difficulty or 'Skirmish';
+        run.objective = {
+            kind = 'text',
+            text = 'Clear every quarter, then the Skirmish Point at ' .. e.loc,
+        };
+        run.note = nil;
+        resync(run);
+        return true;
+    end
+
+    if t == 'skirmish_quarter' then
+        run.difficulty = run.difficulty or 'Skirmish';
+        run.skirmish_groups = run.skirmish_groups or {};
+        run.skirmish_groups[table.concat(e.mobs, ','):lower()] = e.label;
+        local entry = run.extra[e.label];
+        if not entry then
+            entry = { label = e.label, cur = 0, at = self:now() };
+            run.extra[e.label] = entry;
+        end
+        entry.max  = e.max;
+        entry.done = (entry.cur or 0) >= e.max;
+        return true;
+    end
+
+    if t == 'skirmish_progress' then
+        run.difficulty = run.difficulty or 'Skirmish';
+        local label = run.skirmish_groups
+            and run.skirmish_groups[table.concat(e.mobs, ','):lower()]
+            or e.mobs[1] or 'Skirmish';
+        -- 'at' is kept from the first sighting: four quarters advance in
+        -- parallel, and counters that reshuffle on every kill cannot be
+        -- read at a glance.
+        local prev = run.extra[label];
+        run.extra[label] = {
+            label = label, cur = e.cur, max = e.max,
+            done = e.cur >= e.max,
+            at = prev and prev.at or self:now(),
+        };
+        return true;
+    end
+
+    if t == 'skirmish_group_done' then
+        run.note = { text = 'Group #' .. e.group .. ' completed!', at = self:now() };
+        return true;
+    end
+
+    if t == 'skirmish_phase_done' then
+        run.objective = { kind = 'text', text = 'Phase completed! ' .. e.text };
+        run.note = nil;
         return true;
     end
 

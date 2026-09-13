@@ -111,8 +111,8 @@ different costs on different text.
 `parser.relevant(line)` is the first, and the shell calls it in `text_in`
 **before `strip_colors`**, on the raw message, which is the only place the
 allocation is actually avoidable — no reordering inside `parser.lua` can decline
-to make a call the shell already made. It is ten `string.find` searches with
-`plain = true` — three for the colour-code markers, then the seven needles, all
+to make a call the shell already made. It is thirteen `string.find` searches with
+`plain = true` — three for the colour-code markers, then the ten needles, all
 of which must fail — which return indices and never build a string, so a "no"
 costs a fixed number of searches over a short string and nothing else.
 

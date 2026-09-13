@@ -285,6 +285,67 @@ local specific = {
             end
         end
     end,
+
+    -- Allied Skirmish has begun!
+    -- The Skirmish mode: in the corpus since May 2026, invisible until
+    -- 2026-09-13 because nothing in it says 'Incursion ['. Its opening
+    -- carries no instance name; the progress lines below supply one.
+    function(s)
+        if s == 'Allied Skirmish has begun!' then
+            return { t = 'skirmish_begin' };
+        end
+    end,
+
+    -- Defeat the following targets then advance to the Skirmish Point at (H-8) Map #2:
+    function(s)
+        local loc = s:match('^Defeat the following targets then advance to the Skirmish Point at (.+):$');
+        if loc then
+            return { t = 'skirmish_target', loc = trim(loc) };
+        end
+    end,
+
+    --  Orcish Quarter (10): Orcish Trooper, Orcish Gladiator, ...
+    -- One of the four groups in the opening listing. The raw line leads with
+    -- a space, which trim has already removed; the family word is letters
+    -- only, so a chat line quoting the shape does not pass.
+    function(s)
+        local family, max, mobs = s:match("^(%a[%a']*) Quarter %((%d+)%): (.+)$");
+        if family then
+            return {
+                t = 'skirmish_quarter', label = family .. ' Quarter',
+                max = tonumber(max), mobs = split_mobs(mobs),
+            };
+        end
+    end,
+
+    -- Allied Skirmish [Castle Zvahl Baileys] Group #2 completed!
+    function(s)
+        local instance, group = s:match('^Allied Skirmish %[(.-)%] Group #(%d+) completed!$');
+        if instance then
+            return { t = 'skirmish_group_done', instance = instance, group = tonumber(group) };
+        end
+    end,
+
+    -- Allied Skirmish [Castle Zvahl Baileys] Phase completed! Proceed to (H-8) Map #2
+    function(s)
+        local instance, text = s:match('^Allied Skirmish %[(.-)%] Phase completed! (.+)$');
+        if instance then
+            return { t = 'skirmish_phase_done', instance = instance, text = trim(text) };
+        end
+    end,
+
+    -- Allied Skirmish [Castle Zvahl Baileys] 3/10 (Iron Quadav, Spinel Quadav, ...)
+    -- The count belongs to whichever quarter that mob list names; the line
+    -- itself never says which.
+    function(s)
+        local instance, cur, max, mobs = s:match('^Allied Skirmish %[(.-)%] (%d+)/(%d+) %((.+)%)$');
+        if instance then
+            return {
+                t = 'skirmish_progress', instance = instance,
+                cur = tonumber(cur), max = tonumber(max), mobs = split_mobs(mobs),
+            };
+        end
+    end,
 };
 
 --[[
@@ -358,8 +419,8 @@ local LBRACKET = ('['):byte();
 * the shell and before trim below -- because the chat handler runs on every
 * line the client receives, forever, and over 127 real logs 97.5% of them are
 * not ours. string.find with plain = true returns indices and never builds a
-* string, so a 'no' here costs ten searches over a short string and nothing
-* else -- three for the marker bytes below, then the seven needles, all of
+* string, so a 'no' here costs thirteen searches over a short string and nothing
+* else -- three for the marker bytes below, then the ten needles, all of
 * which must fail. The number of searches is fixed and does not depend on
 * the input.
 *
@@ -436,7 +497,10 @@ function parser.relevant(line)
         or line:find('(Boss: ', 1, true)
         or line:find('remaining inside this Incursion', 1, true)
         or line:find('incursion points.', 1, true)
-        or line:find('gains the effect of ', 1, true)) ~= nil;
+        or line:find('gains the effect of ', 1, true)
+        or line:find('Allied Skirmish', 1, true)
+        or line:find('Skirmish Point', 1, true)
+        or line:find(' Quarter (', 1, true)) ~= nil;
 end
 
 --[[
@@ -488,7 +552,10 @@ function parser.parse(line)
         or s:find('^%(Boss: ')
         or s:find('^You have %d')
         or s:find('incursion points%.$')
-        or s:find('): ', 1, true)) then   -- the '(glyph): stats' tail of a boon
+        or s:find('^Allied Skirmish')
+        or s:find('^Defeat the following targets')
+        or s:find('): ', 1, true)) then   -- the '(glyph): stats' tail of a
+                                          -- boon, and of a Quarter listing
         return nil;
     end
 
