@@ -2236,6 +2236,56 @@ def test_state_units(lua, parser, State):
               "the phase completion did not replace the objective: %r"
               % (run and run["objective"] and run["objective"]["text"],))
 
+    # How a Skirmish ends, per the player (2026-09-13): at the reward chest,
+    # or not at all -- and neither speaks a structured line. The chest pays
+    # out through ordinary 'You obtain ...!' lines that also occur mid-run,
+    # so the end is taken on the player's other rule: a timeout, or the next
+    # run beginning. Ten quiet minutes -- quiet meaning no Skirmish line,
+    # since the Skirmish Point fight itself sends none and was observed to
+    # run about four -- and the window hides; any later Skirmish line brings
+    # it back, and Begins! replaces the run outright as it always has.
+    lua.globals()["__clock"] = 9 * 60
+    res.check(bool(sk.should_show(sk)),
+              "a Skirmish window hid inside its ten quiet minutes -- the "
+              "Skirmish Point fight sends no lines and is not over")
+    lua.globals()["__clock"] = 10 * 60 + 1
+    res.check(not sk.should_show(sk),
+              "a Skirmish window is still up past ten quiet minutes, with "
+              "no completion message ever coming to take it down")
+    feed(sk, parser, [
+        "Allied Skirmish [Castle Zvahl Baileys] 9/10 (Goblin Robber, Goblin Poacher, Goblin Reaper, Goblin Trader)",
+    ])
+    res.check(bool(sk.should_show(sk)),
+              "a live Skirmish line did not bring the window back")
+
+    # An ordinary Incursion has a clock of its own and no idle rule.
+    lua.globals()["__clock"] = 0
+    qi = new_state(lua, State)
+    feed(qi, parser, ["Incursion [Fort Ghelsba] Begins! (Normal)"])
+    lua.globals()["__clock"] = 30 * 60
+    res.check(bool(qi.should_show(qi)),
+              "an ordinary Incursion run went quiet for half an hour and "
+              "the window hid -- the idle rule is the Skirmish's alone")
+
+    # The quiet spell survives a reload: a blob saved mid-silence and
+    # restored later has been quiet the whole gap.
+    lua.globals()["__clock"] = 60
+    sk_save = new_state(lua, State)
+    feed(sk_save, parser, [
+        "Allied Skirmish [Castle Zvahl Baileys] 4/10 (Goblin Robber, Goblin Poacher, Goblin Reaper, Goblin Trader)",
+    ])
+    blob = sk_save.serialise(sk_save)
+    res.check(blob is not None and bool(blob["skirmish"]),
+              "a Skirmish run's blob does not say it is one")
+    blob["saved_at"] = blob["saved_at"] - 11 * 60
+    sk_back = new_state(lua, State)
+    res.check(bool(sk_back.restore(sk_back, blob)),
+              "an eleven-minute-old Skirmish blob was refused outright -- "
+              "hiding is the idle rule's job, not restore's")
+    res.check(not sk_back.should_show(sk_back),
+              "a Skirmish restored after eleven quiet minutes came back on "
+              "screen as if the mode were still running")
+
     # A progress line with no setup behind it -- the addon loaded mid-mode.
     # The quarter's name is unknowable, so the first mob names the counter
     # rather than the count being dropped.
