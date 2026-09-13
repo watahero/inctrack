@@ -3567,7 +3567,7 @@ def first_diff(got, want):
 #    'Next:' line with a right-aligned location.
 WINDOW_MID_PHASE = expected_window("""
 PushStyleVar 13 [4, 2]
-Begin 'inctrack###incursion_window' p_open=nil flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+Begin 'inctrack###incursion_window' p_open=true flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
   TextColored instance 'Crawlers' Nest Depths'
   SameLine
@@ -3601,7 +3601,7 @@ PopStyleVar 1
 #    kill line and its mob list are gone.
 WINDOW_BOSS_UP = expected_window("""
 PushStyleVar 13 [4, 2]
-Begin 'inctrack###incursion_window' p_open=nil flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+Begin 'inctrack###incursion_window' p_open=true flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
   TextColored instance 'Crawlers' Nest Depths'
   SameLine
@@ -3628,7 +3628,7 @@ PopStyleVar 1
 #    objective has been announced, so the objective section says so.
 WINDOW_BONUS = expected_window("""
 PushStyleVar 13 [4, 2]
-Begin 'inctrack###incursion_window' p_open=nil flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+Begin 'inctrack###incursion_window' p_open=true flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
   TextColored instance 'Crawlers' Nest Depths'
   SameLine
@@ -3677,7 +3677,7 @@ PopStyleVar 1
 #    the old phase's boss would be a lie.
 WINDOW_RECONNECTED = expected_window("""
 PushStyleVar 13 [4, 2]
-Begin 'inctrack###incursion_window' p_open=nil flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+Begin 'inctrack###incursion_window' p_open=true flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
   TextColored instance 'Crawlers' Nest Depths'
   SameLine
@@ -3709,7 +3709,7 @@ PopStyleVar 1
 #    do-not-overprint branch, ui.lua (`if target > imgui.GetCursorPosX()`).
 WINDOW_FINISHED = expected_window("""
 PushStyleVar 13 [4, 2]
-Begin 'inctrack###incursion_window' p_open=nil flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+Begin 'inctrack###incursion_window' p_open=true flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
   TextColored instance 'Crawlers' Nest Depths'
   SameLine
@@ -3736,7 +3736,7 @@ PopStyleVar 1
 #    format call), which is why the SetCursorPosX values are unchanged.
 WINDOW_PERCENT = expected_window("""
 PushStyleVar 13 [4, 2]
-Begin 'inctrack###incursion_window' p_open=nil flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
+Begin 'inctrack###incursion_window' p_open=true flags=AlwaysAutoResize|NoFocusOnAppearing|NoScrollbar|NoTitleBar
   Dummy [300, 1]
   TextColored instance 'Vault 50%% Sealed'
   SameLine
@@ -4195,25 +4195,22 @@ def test_ui():
 
     # --- CR-01: which slot each Begin argument arrived in ------------------
 
-    # Ashita declares Begin exactly once, and positionally:
-    #
-    #     virtual bool Begin(const char* name, bool* p_open = nullptr,
-    #                        ImGuiWindowFlags flags = 0) = 0;
-    #     (Ashita/plugins/sdk/imgui.h:305)
-    #
-    # There is no overload, and addons/libs/imgui.lua adds no Lua wrapper that
-    # could reshape the call -- it is a constants table whose __index is
-    # AshitaCore:GetGuiManager(), so the call lands on that signature
-    # unmediated. Flags handed to slot 2 are therefore not flags: they are a
-    # p_open. In game the window would come back with a title bar, resizable,
-    # collapsible, stealing focus, no longer fitting its own height and no
-    # longer honouring /incursion lock -- or the binding would raise
-    # 'bad argument #2' sixty times a second inside d3d_present.
+    # Ashita declares Begin positionally -- Begin(const char* name, bool*
+    # p_open, ImGuiWindowFlags flags), plugins/sdk/imgui.h:305 -- so the
+    # flags must ride in slot 3. What goes in slot 2 was settled in the
+    # field, not in the header: with an explicit nil there, the window came
+    # back IN GAME with a title bar and a fixed size (reported 2026-09-13),
+    # meaning the binding dropped everything after the nil and none of the
+    # flags ui.render computed ever arrived. Every working addon in the
+    # player's install -- twenty-six of them counted -- passes a boolean
+    # `true` in that slot, and that form demonstrably delivers slot 3. So
+    # slot 2 is pinned to `true`: a boolean by value, which is not a box the
+    # host could write a close-click into, keeping FIX-03 above intact.
     #
     # A layout snapshot cannot catch that on its own: it compares what was
     # drawn, and this is a fault in how the drawing was *requested*. So the
     # argument positions are pinned here by name, each with the symptom it
-    # produces, and the recorder no longer forgives a numeric slot 2.
+    # produces.
     shape_host = make_host()
     shape_parser = shape_host.require("parser")
     ShapeState = shape_host.require("state")
@@ -4238,15 +4235,17 @@ def test_ui():
                   "the flags behind entirely" % len(args))
 
         p_open = args[1] if len(args) > 1 else None
-        res.check(not isinstance(p_open, (int, float)),
+        res.check(not (isinstance(p_open, (int, float))
+                       and not isinstance(p_open, bool)),
                   "a number reached Begin's slot 2, which is p_open and not "
                   "flags -- in game every flag ui.render computed would be "
                   "dropped (title bar back, no auto-resize, /incursion lock "
                   "dead) or the binding would raise once per frame")
-        res.check(p_open is None,
-                  "Begin's slot 2 is %r, not nil -- this window is drawn "
-                  "without a title bar, so it must ask for no close control "
-                  "at all rather than one it can never show" % (p_open,))
+        res.check(p_open is True,
+                  "Begin's slot 2 is %r, not true -- an explicit nil there "
+                  "was seen in game to cost every flag in slot 3 (title bar "
+                  "back, no auto-resize), and a table is a close-control box "
+                  "this titleless window could never show" % (p_open,))
 
         flags = args[2] if len(args) > 2 else None
         res.check(isinstance(flags, (int, float))
